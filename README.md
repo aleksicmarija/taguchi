@@ -28,7 +28,7 @@ package main
 
 import (
     "fmt"
-    "github.com/marijaaleksic/taguchi/taguchi"
+    "github.com/marijaaleksic/taguchi"
 )
 
 func main() {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marijaaleksic/taguchi/taguchi"
+	"github.com/marijaaleksic/taguchi"
 )
 
 type SortAlgorithm int
