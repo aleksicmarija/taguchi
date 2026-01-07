@@ -81,10 +81,7 @@ func main() {
     results := exp.Analyze()
     
     // Display optimal settings
-    fmt.Println("Optimal Factor Levels:")
-    for factor, level := range results.OptimalLevels {
-        fmt.Printf("  %s: %.2f\n", factor, level)
-    }
+    taguchi.PrintAnalysisReport(results)
 }
 ```
 
@@ -110,7 +107,7 @@ Higher SNR values indicate better performance with less sensitivity to noise.
 
 ### Orthogonal Arrays
 
-Orthogonal arrays enable efficient experiment design by testing only a strategic subset of all possible combinations while maintaining statistical balance. The library includes standard arrays like L4, L8, L9, L16, L18, and L27.
+Orthogonal arrays enable efficient experiment design by testing only a strategic subset of all possible combinations while maintaining statistical balance. The library includes standard arrays like L4, L8, L9, L16, and L18.
 
 ## API Reference
 
@@ -189,12 +186,19 @@ func (e *Experiment) Analyze() AnalysisResult
 ```
 Performs complete statistical analysis including ANOVA and optimal level determination.
 
+#### `PrintAnalysisReport`
+```go
+func PrintAnalysisReport(result AnalysisResult)
+```
+
+Prints Analysis report.
+
 ## Example: Parallel Sorting Optimization
 
 See `examples/main.go` for a complete example that optimizes parallel sorting algorithms by varying:
 
-- **Control Factors**: Number of goroutines, sorting algorithm (QuickSort, MergeSort, BitonicSort)
-- **Noise Factors**: CPU load levels
+- **Control Factors**: Number of goroutines, sorting algorithm (QuickSort, RadixSort)
+- **Noise Factors**: Data patterns
 - **Goal**: Minimize sorting time
 
 The example demonstrates:
