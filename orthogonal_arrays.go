@@ -1,13 +1,23 @@
 package taguchi
 
-var StandardArrays = map[string][][]int{
-	"L4": {
+type OrthogonalArrayType string
+
+const (
+	L4  OrthogonalArrayType = "L4"
+	L8  OrthogonalArrayType = "L8"
+	L9  OrthogonalArrayType = "L9"
+	L16 OrthogonalArrayType = "L16"
+	L18 OrthogonalArrayType = "L18"
+)
+
+var StandardArrays = map[OrthogonalArrayType][][]int{
+	L4: {
 		{1, 1, 1},
 		{1, 2, 2},
 		{2, 1, 2},
 		{2, 2, 1},
 	},
-	"L8": {
+	L8: {
 		{1, 1, 1, 1, 1, 1, 1},
 		{1, 1, 1, 2, 2, 2, 2},
 		{1, 2, 2, 1, 1, 2, 2},
@@ -17,7 +27,7 @@ var StandardArrays = map[string][][]int{
 		{2, 2, 1, 1, 2, 2, 1},
 		{2, 2, 1, 2, 1, 1, 2},
 	},
-	"L9": {
+	L9: {
 		{1, 1, 1, 1},
 		{1, 2, 2, 2},
 		{1, 3, 3, 3},
@@ -28,7 +38,7 @@ var StandardArrays = map[string][][]int{
 		{3, 2, 1, 3},
 		{3, 3, 2, 1},
 	},
-	"L16": {
+	L16: {
 		{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 		{1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
 		{1, 1, 2, 2, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 2},
@@ -46,7 +56,7 @@ var StandardArrays = map[string][][]int{
 		{2, 2, 2, 1, 1, 1, 1, 2, 2, 2, 1, 2, 2, 1, 2},
 		{2, 2, 2, 1, 2, 2, 2, 1, 1, 1, 2, 1, 1, 2, 1},
 	},
-	"L18": {
+	L18: {
 		{1, 1, 1, 1, 1, 1, 1, 1},
 		{1, 1, 2, 2, 2, 2, 2, 2},
 		{1, 1, 3, 3, 3, 3, 3, 3},

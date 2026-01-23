@@ -4,10 +4,10 @@ import (
 	"fmt"
 )
 
-// NewExperiment initializes a new Taguchi experiment with control factors, noise factors, goal, and target.
-// arrayName selects a standard orthogonal array (e.g., "L4", "L8") to generate the trial layout.
+// NewExperiment initializes a new Taguchi experiment with control factors, noise factors, and goal.
+// arrayName selects a standard orthogonal array (e.g., L4, L8) to generate the trial layout.
 // Returns an error if the array does not exist or cannot accommodate the number of control factors.
-func NewExperiment(goal OptimizationGoal, target float64, poolingThreshold float64, controlFactors []Factor, arrayName string, noiseFactors []NoiseFactor) (*Experiment, error) {
+func NewExperiment(goal OptimizationGoal, controlFactors []Factor, arrayName OrthogonalArrayType, noiseFactors []NoiseFactor) (*Experiment, error) {
 	oa, ok := StandardArrays[arrayName]
 	if !ok {
 		return nil, fmt.Errorf("orthogonal array %s not defined", arrayName)
@@ -16,12 +16,27 @@ func NewExperiment(goal OptimizationGoal, target float64, poolingThreshold float
 		return nil, fmt.Errorf("orthogonal array %s cannot accommodate %d factors", arrayName, len(controlFactors))
 	}
 	return &Experiment{
-		ControlFactors:   controlFactors,
-		NoiseFactors:     noiseFactors,
-		Goal:             goal,
-		Target:           target,
-		OrthogonalArray:  oa,
-		PoolingThreshold: poolingThreshold,
+		ControlFactors:  controlFactors,
+		NoiseFactors:    noiseFactors,
+		Goal:            goal,
+		OrthogonalArray: oa,
+	}, nil
+}
+
+// NewExperimentUsingArray initializes a new Taguchi experiment with a user-provided orthogonal array.
+// Returns an error if the array is empty or cannot accommodate the number of control factors.
+func NewExperimentUsingArray(goal OptimizationGoal, controlFactors []Factor, orthogonalArray [][]int, noiseFactors []NoiseFactor) (*Experiment, error) {
+	if len(orthogonalArray) == 0 {
+		return nil, fmt.Errorf("orthogonal array must not be empty")
+	}
+	if len(controlFactors) > len(orthogonalArray[0]) {
+		return nil, fmt.Errorf("orthogonal array cannot accommodate %d factors", len(controlFactors))
+	}
+	return &Experiment{
+		ControlFactors:  controlFactors,
+		NoiseFactors:    noiseFactors,
+		Goal:            goal,
+		OrthogonalArray: orthogonalArray,
 	}, nil
 }
 
@@ -61,7 +76,7 @@ func (e *Experiment) Analyze() AnalysisResult {
 				}
 			}
 			if match {
-				sum += e.calculateSNR(r.Observations)
+				sum += e.Goal.CalculateSNR(r.Observations)
 				count++
 			}
 		}

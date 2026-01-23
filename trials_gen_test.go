@@ -2,12 +2,12 @@ package taguchi
 
 import "testing"
 
-func setupTrialExperiment(arrayName string, noiseFactors []NoiseFactor) *Experiment {
+func setupTrialExperiment(arrayName OrthogonalArrayType, noiseFactors []NoiseFactor) *Experiment {
 	factors := []Factor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 	}
-	exp, _ := NewExperiment(SmallerTheBetter, 0, 0, factors, arrayName, noiseFactors)
+	exp, _ := NewExperiment(SmallerTheBetter{}, factors, arrayName, noiseFactors)
 	return exp
 }
 
@@ -15,7 +15,7 @@ func TestGenerateTrials_Count(t *testing.T) {
 	noise := []NoiseFactor{
 		{Name: "N1", Levels: []float64{0, 1}},
 	}
-	exp := setupTrialExperiment("L4", noise)
+	exp := setupTrialExperiment(L4, noise)
 	trials := exp.GenerateTrials()
 
 	// L4 has 4 rows, 2 noise levels = 4*2 = 8 trials
@@ -29,7 +29,7 @@ func TestGenerateTrials_ControlConfigs(t *testing.T) {
 	noise := []NoiseFactor{
 		{Name: "N1", Levels: []float64{0}},
 	}
-	exp := setupTrialExperiment("L4", noise)
+	exp := setupTrialExperiment(L4, noise)
 	trials := exp.GenerateTrials()
 
 	// L4 first 2 columns: {1,1}, {1,2}, {2,1}, {2,2}
@@ -62,7 +62,7 @@ func TestGenerateTrials_NoiseCombinations(t *testing.T) {
 	noise := []NoiseFactor{
 		{Name: "N1", Levels: []float64{0, 1}},
 	}
-	exp := setupTrialExperiment("L4", noise)
+	exp := setupTrialExperiment(L4, noise)
 	trials := exp.GenerateTrials()
 
 	// Each OA row should produce 2 trials (one per noise level)
@@ -76,7 +76,7 @@ func TestGenerateTrials_NoiseCombinations(t *testing.T) {
 }
 
 func TestGenerateTrials_NoNoise(t *testing.T) {
-	exp := setupTrialExperiment("L4", nil)
+	exp := setupTrialExperiment(L4, nil)
 	trials := exp.GenerateTrials()
 
 	// No noise factors -> 0 noise combinations -> 0 trials
@@ -102,7 +102,7 @@ func TestGenerateTrials_MultipleNoise(t *testing.T) {
 		{Name: "N1", Levels: []float64{0, 1}},
 		{Name: "N2", Levels: []float64{100, 200}},
 	}
-	exp := setupTrialExperiment("L4", noise)
+	exp := setupTrialExperiment(L4, noise)
 	trials := exp.GenerateTrials()
 
 	// 4 OA rows * (2*2) noise combos = 16 trials
@@ -116,7 +116,7 @@ func TestGenerateTrials_IDs(t *testing.T) {
 	noise := []NoiseFactor{
 		{Name: "N1", Levels: []float64{0, 1}},
 	}
-	exp := setupTrialExperiment("L4", noise)
+	exp := setupTrialExperiment(L4, noise)
 	trials := exp.GenerateTrials()
 
 	for i, trial := range trials {

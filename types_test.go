@@ -7,16 +7,15 @@ func TestOptimizationGoal_String(t *testing.T) {
 		goal OptimizationGoal
 		want string
 	}{
-		{SmallerTheBetter, "Smaller-the-Better"},
-		{LargerTheBetter, "Larger-the-Better"},
-		{NominalTheBest, "Nominal-the-Best"},
-		{OptimizationGoal(99), "Unknown"},
+		{SmallerTheBetter{}, "Smaller-the-Better"},
+		{LargerTheBetter{}, "Larger-the-Better"},
+		{NominalTheBest{Target: 10}, "Nominal-the-Best"},
 	}
 
 	for _, tt := range tests {
 		got := tt.goal.String()
 		if got != tt.want {
-			t.Errorf("OptimizationGoal(%d).String() = %q, want %q", tt.goal, got, tt.want)
+			t.Errorf("%T.String() = %q, want %q", tt.goal, got, tt.want)
 		}
 	}
 }

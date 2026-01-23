@@ -135,11 +135,9 @@ func main() {
 	}
 
 	exp, _ := taguchi.NewExperiment(
-		taguchi.SmallerTheBetter,
-		0,
-		0.05,
+		taguchi.SmallerTheBetter{},
 		[]taguchi.Factor{workerFactor, algorithmFactor},
-		"L8",
+		taguchi.L8,
 		[]taguchi.NoiseFactor{noise},
 	)
 
