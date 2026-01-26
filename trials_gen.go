@@ -1,7 +1,7 @@
 package taguchi
 
 // GenerateTrials produces all possible trial configurations for the experiment.
-func (e *Experiment) GenerateTrials() []Trial {
+func (e *Experiment[P]) GenerateTrials() []Trial {
 	// Step 1: Generate all noise combinations
 	noiseTrials := e.generateNoiseCombinations()
 
@@ -13,7 +13,7 @@ func (e *Experiment) GenerateTrials() []Trial {
 
 // generateNoiseCombinations generates all combinations of noise factors.
 // Returns a slice of Trials containing only the Noise field populated (Control is nil).
-func (e *Experiment) generateNoiseCombinations() []Trial {
+func (e *Experiment[P]) generateNoiseCombinations() []Trial {
 	var trials []Trial
 	id := 1
 
@@ -46,7 +46,7 @@ func (e *Experiment) generateNoiseCombinations() []Trial {
 
 // combineControlAndNoise takes a list of noise-only trials and combines them with all control factor configurations
 // defined by the orthogonal array. Returns a slice of fully defined Trials.
-func (e *Experiment) combineControlAndNoise(noiseTrials []Trial) []Trial {
+func (e *Experiment[P]) combineControlAndNoise(noiseTrials []Trial) []Trial {
 	var finalTrials []Trial
 	id := 1 // reset ID for full trial list
 
@@ -68,7 +68,7 @@ func (e *Experiment) combineControlAndNoise(noiseTrials []Trial) []Trial {
 }
 
 // getControlConfig converts a single orthogonal array row into a map of control factor names to levels.
-func (e *Experiment) getControlConfig(row []int) map[string]float64 {
+func (e *Experiment[P]) getControlConfig(row []int) map[string]float64 {
 	controlConfig := make(map[string]float64, len(e.ControlFactors))
 	for j, factor := range e.ControlFactors {
 		levelIndex := row[j] - 1 // orthogonal array indices are 1-based

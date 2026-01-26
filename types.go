@@ -2,38 +2,26 @@ package taguchi
 
 // OptimizationGoal defines the type of quality characteristic being optimized.
 // It is used to determine how the Signal-to-Noise (SNR) ratio is calculated for trials.
-type OptimizationGoal int
-
-const (
-	// SmallerTheBetter means the goal is to minimize the response variable.
-	SmallerTheBetter OptimizationGoal = iota
-
-	// LargerTheBetter means the goal is to maximize the response variable.
-	LargerTheBetter
-
-	// NominalTheBest means the goal is to achieve a target value with minimal deviation.
-	NominalTheBest
-)
-
-// String provides a human-readable representation of the OptimizationGoal.
-// Useful for logging and displaying experiment settings.
-func (o OptimizationGoal) String() string {
-	switch o {
-	case SmallerTheBetter:
-		return "Smaller-the-Better"
-	case LargerTheBetter:
-		return "Larger-the-Better"
-	case NominalTheBest:
-		return "Nominal-the-Best"
-	default:
-		return "Unknown"
-	}
+type OptimizationGoal interface {
+	CalculateSNR(observations []float64) float64
+	String() string
 }
 
-// Factor represents a controllable input variable in the experiment.
+// SmallerTheBetter means the goal is to minimize the response variable.
+type SmallerTheBetter struct{}
+
+// LargerTheBetter means the goal is to maximize the response variable.
+type LargerTheBetter struct{}
+
+// NominalTheBest means the goal is to achieve a target value with minimal deviation.
+type NominalTheBest struct {
+	Target float64
+}
+
+// ControlFactor represents a controllable input variable in the experiment.
 // Name: Identifier for the factor (e.g., "NumThreads").
 // Levels: A slice of possible numeric values that this factor can take.
-type Factor struct {
+type ControlFactor struct {
 	Name   string
 	Levels []float64
 }
@@ -99,19 +87,17 @@ type ANOVAResult struct {
 }
 
 // Experiment encapsulates all the configuration and results for a Taguchi experiment.
+// The type parameter P is the struct type used by Params to convert trial control maps.
 // ControlFactors: Factors we can manipulate.
 // NoiseFactors: Uncontrollable environmental factors.
 // Goal: Optimization goal (Smaller, Larger, or Nominal).
-// Target: Target value (used for NominalTheBest).
 // OrthogonalArray: Predefined L4/L8/L9/etc. orthogonal array for trial combinations.
 // Results: Collection of TrialResults after experiments.
-// PoolingThreshold: Threshold used for pooling small-effect factors in ANOVA.
-type Experiment struct {
-	ControlFactors   []Factor
-	NoiseFactors     []NoiseFactor
-	Goal             OptimizationGoal
-	Target           float64
-	OrthogonalArray  [][]int
-	Results          []TrialResult
-	PoolingThreshold float64
+type Experiment[P any] struct {
+	ControlFactors  []ControlFactor
+	NoiseFactors    []NoiseFactor
+	Goal            OptimizationGoal
+	OrthogonalArray [][]int
+	Results         []TrialResult
+	controlAs       func(Trial) P
 }
