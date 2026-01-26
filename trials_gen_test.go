@@ -2,12 +2,12 @@ package taguchi
 
 import "testing"
 
-func setupTrialExperiment(arrayName OrthogonalArrayType, noiseFactors []NoiseFactor) *Experiment {
-	factors := []Factor{
+func setupTrialExperiment(arrayName ArrayType, noiseFactors []NoiseFactor) *Experiment[struct{}] {
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 	}
-	exp, _ := NewExperiment(SmallerTheBetter{}, factors, arrayName, noiseFactors)
+	exp, _ := NewExperimentFromFactors(SmallerTheBetter{}, factors, arrayName, noiseFactors)
 	return exp
 }
 

@@ -18,10 +18,10 @@ type NominalTheBest struct {
 	Target float64
 }
 
-// Factor represents a controllable input variable in the experiment.
+// ControlFactor represents a controllable input variable in the experiment.
 // Name: Identifier for the factor (e.g., "NumThreads").
 // Levels: A slice of possible numeric values that this factor can take.
-type Factor struct {
+type ControlFactor struct {
 	Name   string
 	Levels []float64
 }
@@ -87,15 +87,17 @@ type ANOVAResult struct {
 }
 
 // Experiment encapsulates all the configuration and results for a Taguchi experiment.
+// The type parameter P is the struct type used by Params to convert trial control maps.
 // ControlFactors: Factors we can manipulate.
 // NoiseFactors: Uncontrollable environmental factors.
 // Goal: Optimization goal (Smaller, Larger, or Nominal).
 // OrthogonalArray: Predefined L4/L8/L9/etc. orthogonal array for trial combinations.
 // Results: Collection of TrialResults after experiments.
-type Experiment struct {
-	ControlFactors  []Factor
+type Experiment[P any] struct {
+	ControlFactors  []ControlFactor
 	NoiseFactors    []NoiseFactor
 	Goal            OptimizationGoal
 	OrthogonalArray [][]int
 	Results         []TrialResult
+	controlAs       func(Trial) P
 }

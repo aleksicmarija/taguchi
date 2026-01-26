@@ -44,7 +44,7 @@ func TestSNRNominalTheBest(t *testing.T) {
 	target := 10.0
 	// msd = (1+0+1)/3 = 2/3
 	// SNR = -10*log10(2/3) ≈ 1.7609
-	want := -10 * math.Log10(2.0 / 3.0)
+	want := -10 * math.Log10(2.0/3.0)
 	got := NominalTheBest{Target: target}.CalculateSNR(obs)
 	if !almostEqual(got, want, tolerance) {
 		t.Errorf("NominalTheBest.CalculateSNR([9,10,11], 10) = %f, want %f", got, want)
@@ -108,7 +108,7 @@ func TestSNRSingleObservation(t *testing.T) {
 			name: "LargerTheBetter single",
 			goal: LargerTheBetter{},
 			obs:  []float64{5},
-			want: -10 * math.Log10(1.0 / 25.0),
+			want: -10 * math.Log10(1.0/25.0),
 		},
 		{
 			name: "NominalTheBest single",

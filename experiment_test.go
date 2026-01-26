@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestNewExperiment_Valid(t *testing.T) {
-	factors := []Factor{
+func TestNewExperimentFromFactors_Valid(t *testing.T) {
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 	}
@@ -14,12 +14,12 @@ func TestNewExperiment_Valid(t *testing.T) {
 		{Name: "N", Levels: []float64{0}},
 	}
 
-	exp, err := NewExperiment(SmallerTheBetter{}, factors, L4, noise)
+	exp, err := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, noise)
 	if err != nil {
-		t.Fatalf("NewExperiment() returned error: %v", err)
+		t.Fatalf("NewExperimentFromFactors() returned error: %v", err)
 	}
 	if exp == nil {
-		t.Fatal("NewExperiment() returned nil experiment")
+		t.Fatal("NewExperimentFromFactors() returned nil experiment")
 	}
 	if _, ok := exp.Goal.(SmallerTheBetter); !ok {
 		t.Errorf("Goal = %v, want SmallerTheBetter", exp.Goal)
@@ -32,35 +32,35 @@ func TestNewExperiment_Valid(t *testing.T) {
 	}
 }
 
-func TestNewExperiment_InvalidArray(t *testing.T) {
-	factors := []Factor{
+func TestNewExperimentFromFactors_InvalidArray(t *testing.T) {
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 	}
-	_, err := NewExperiment(SmallerTheBetter{}, factors, OrthogonalArrayType("L99"), nil)
+	_, err := NewExperimentFromFactors(SmallerTheBetter{}, factors, ArrayType("L99"), nil)
 	if err == nil {
-		t.Error("NewExperiment() with invalid array should return error")
+		t.Error("NewExperimentFromFactors() with invalid array should return error")
 	}
 }
 
-func TestNewExperiment_TooManyFactors(t *testing.T) {
+func TestNewExperimentFromFactors_TooManyFactors(t *testing.T) {
 	// L4 has 3 columns, so 4 factors should fail
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{1, 2}},
 		{Name: "C", Levels: []float64{1, 2}},
 		{Name: "D", Levels: []float64{1, 2}},
 	}
-	_, err := NewExperiment(SmallerTheBetter{}, factors, L4, nil)
+	_, err := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, nil)
 	if err == nil {
-		t.Error("NewExperiment() with too many factors should return error")
+		t.Error("NewExperimentFromFactors() with too many factors should return error")
 	}
 }
 
 func TestAddResult(t *testing.T) {
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 	}
-	exp, _ := NewExperiment(SmallerTheBetter{}, factors, L4, nil)
+	exp, _ := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, nil)
 
 	trial := Trial{ID: 1, Control: map[string]float64{"A": 1}}
 	exp.AddResult(trial, []float64{1.0, 2.0, 3.0})
@@ -79,7 +79,7 @@ func TestAddResult(t *testing.T) {
 }
 
 func TestAnalyze_L4_SmallerTheBetter(t *testing.T) {
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 	}
@@ -87,9 +87,9 @@ func TestAnalyze_L4_SmallerTheBetter(t *testing.T) {
 		{Name: "N", Levels: []float64{0}},
 	}
 
-	exp, err := NewExperiment(SmallerTheBetter{}, factors, L4, noise)
+	exp, err := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, noise)
 	if err != nil {
-		t.Fatalf("NewExperiment() error: %v", err)
+		t.Fatalf("NewExperimentFromFactors() error: %v", err)
 	}
 
 	trials := exp.GenerateTrials()
@@ -156,7 +156,7 @@ func TestAnalyze_L4_SmallerTheBetter(t *testing.T) {
 }
 
 func TestAnalyze_L9_NominalTheBest(t *testing.T) {
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "X", Levels: []float64{1, 2, 3}},
 		{Name: "Y", Levels: []float64{10, 20, 30}},
 		{Name: "Z", Levels: []float64{100, 200, 300}},
@@ -166,21 +166,13 @@ func TestAnalyze_L9_NominalTheBest(t *testing.T) {
 	}
 
 	target := 50.0
-	exp, err := NewExperiment(NominalTheBest{Target: target}, factors, L9, noise)
+	exp, err := NewExperimentFromFactors(NominalTheBest{Target: target}, factors, L9, noise)
 	if err != nil {
-		t.Fatalf("NewExperiment() error: %v", err)
+		t.Fatalf("NewExperimentFromFactors() error: %v", err)
 	}
 
 	trials := exp.GenerateTrials()
 
-	// Response: X + Y (Z is irrelevant noise that adds variability)
-	// Target = 50, so best is X=3 + Y=30 = 33? No...
-	// Let's make response = X*10 + Y, target=50
-	// X=1,Y=10 -> 20; X=2,Y=20 -> 40; X=3,Y=30 -> 60
-	// Closest to 50: X=2,Y=30->50 (exact match gets +Inf SNR)
-	// But with L9 layout we don't control exact combos.
-	// Simpler: response = X*Y, and ignore Z
-	// Just verify the analysis runs and produces valid output
 	for _, trial := range trials {
 		obs := trial.Control["X"] * trial.Control["Y"]
 		exp.AddResult(trial, []float64{obs})
@@ -220,12 +212,12 @@ func TestAnalyze_L9_NominalTheBest(t *testing.T) {
 }
 
 func TestAnalyze_MainEffects(t *testing.T) {
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 	}
 
-	exp, _ := NewExperiment(SmallerTheBetter{}, factors, L4, nil)
+	exp, _ := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, nil)
 	trials := exp.GenerateTrials()
 
 	for _, trial := range trials {
@@ -252,13 +244,13 @@ func TestAnalyze_MainEffects(t *testing.T) {
 }
 
 func TestAnalyze_Contributions(t *testing.T) {
-	factors := []Factor{
+	factors := []ControlFactor{
 		{Name: "A", Levels: []float64{1, 2}},
 		{Name: "B", Levels: []float64{10, 20}},
 		{Name: "C", Levels: []float64{100, 200}},
 	}
 
-	exp, _ := NewExperiment(SmallerTheBetter{}, factors, L4, nil)
+	exp, _ := NewExperimentFromFactors(SmallerTheBetter{}, factors, L4, nil)
 	trials := exp.GenerateTrials()
 
 	// Response dominated by C (largest range)

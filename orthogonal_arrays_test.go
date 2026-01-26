@@ -3,7 +3,7 @@ package taguchi
 import "testing"
 
 func TestStandardArrays_Exist(t *testing.T) {
-	expected := []OrthogonalArrayType{L4, L8, L9, L16, L18}
+	expected := []ArrayType{L4, L8, L9, L16, L18}
 	for _, name := range expected {
 		if _, ok := StandardArrays[name]; !ok {
 			t.Errorf("StandardArrays missing %q", name)
@@ -12,7 +12,7 @@ func TestStandardArrays_Exist(t *testing.T) {
 }
 
 func TestStandardArrays_Dimensions(t *testing.T) {
-	expectedRows := map[OrthogonalArrayType]int{
+	expectedRows := map[ArrayType]int{
 		L4:  4,
 		L8:  8,
 		L9:  9,

@@ -4,10 +4,14 @@ import (
 	"fmt"
 )
 
-// NewExperiment initializes a new Taguchi experiment with control factors, noise factors, and goal.
+// NewExperiment initializes a new generic Taguchi experiment. F is the factors struct type
+// (inferred from the factors argument), P is the params struct type for ControlAs.
 // arrayName selects a standard orthogonal array (e.g., L4, L8) to generate the trial layout.
-// Returns an error if the array does not exist or cannot accommodate the number of control factors.
-func NewExperiment(goal OptimizationGoal, controlFactors []Factor, arrayName OrthogonalArrayType, noiseFactors []NoiseFactor) (*Experiment, error) {
+func NewExperiment[F any, P any](goal OptimizationGoal, factors F, arrayName ArrayType, noiseFactors []NoiseFactor) (*Experiment[P], error) {
+	controlFactors, err := factorsFrom(factors)
+	if err != nil {
+		return nil, err
+	}
 	oa, ok := StandardArrays[arrayName]
 	if !ok {
 		return nil, fmt.Errorf("orthogonal array %s not defined", arrayName)
@@ -15,7 +19,47 @@ func NewExperiment(goal OptimizationGoal, controlFactors []Factor, arrayName Ort
 	if len(controlFactors) > len(oa[0]) {
 		return nil, fmt.Errorf("orthogonal array %s cannot accommodate %d factors", arrayName, len(controlFactors))
 	}
-	return &Experiment{
+	return &Experiment[P]{
+		ControlFactors:  controlFactors,
+		NoiseFactors:    noiseFactors,
+		Goal:            goal,
+		OrthogonalArray: oa,
+		controlAs:       buildControlAs[P](),
+	}, nil
+}
+
+// NewExperimentUsingArray initializes a new generic Taguchi experiment with a user-provided orthogonal array.
+func NewExperimentUsingArray[F any, P any](goal OptimizationGoal, factors F, orthogonalArray [][]int, noiseFactors []NoiseFactor) (*Experiment[P], error) {
+	controlFactors, err := factorsFrom(factors)
+	if err != nil {
+		return nil, err
+	}
+	if len(orthogonalArray) == 0 {
+		return nil, fmt.Errorf("orthogonal array must not be empty")
+	}
+	if len(controlFactors) > len(orthogonalArray[0]) {
+		return nil, fmt.Errorf("orthogonal array cannot accommodate %d factors", len(controlFactors))
+	}
+	return &Experiment[P]{
+		ControlFactors:  controlFactors,
+		NoiseFactors:    noiseFactors,
+		Goal:            goal,
+		OrthogonalArray: orthogonalArray,
+		controlAs:       buildControlAs[P](),
+	}, nil
+}
+
+// NewExperimentFromFactors initializes a Taguchi experiment from a pre-built []Factor slice.
+// This is the non-generic constructor for callers who already have []Factor.
+func NewExperimentFromFactors(goal OptimizationGoal, controlFactors []ControlFactor, arrayName ArrayType, noiseFactors []NoiseFactor) (*Experiment[struct{}], error) {
+	oa, ok := StandardArrays[arrayName]
+	if !ok {
+		return nil, fmt.Errorf("orthogonal array %s not defined", arrayName)
+	}
+	if len(controlFactors) > len(oa[0]) {
+		return nil, fmt.Errorf("orthogonal array %s cannot accommodate %d factors", arrayName, len(controlFactors))
+	}
+	return &Experiment[struct{}]{
 		ControlFactors:  controlFactors,
 		NoiseFactors:    noiseFactors,
 		Goal:            goal,
@@ -23,16 +67,16 @@ func NewExperiment(goal OptimizationGoal, controlFactors []Factor, arrayName Ort
 	}, nil
 }
 
-// NewExperimentUsingArray initializes a new Taguchi experiment with a user-provided orthogonal array.
-// Returns an error if the array is empty or cannot accommodate the number of control factors.
-func NewExperimentUsingArray(goal OptimizationGoal, controlFactors []Factor, orthogonalArray [][]int, noiseFactors []NoiseFactor) (*Experiment, error) {
+// NewExperimentFromFactorsUsingArray initializes a Taguchi experiment from a pre-built []Factor slice
+// with a user-provided orthogonal array.
+func NewExperimentFromFactorsUsingArray(goal OptimizationGoal, controlFactors []ControlFactor, orthogonalArray [][]int, noiseFactors []NoiseFactor) (*Experiment[struct{}], error) {
 	if len(orthogonalArray) == 0 {
 		return nil, fmt.Errorf("orthogonal array must not be empty")
 	}
 	if len(controlFactors) > len(orthogonalArray[0]) {
 		return nil, fmt.Errorf("orthogonal array cannot accommodate %d factors", len(controlFactors))
 	}
-	return &Experiment{
+	return &Experiment[struct{}]{
 		ControlFactors:  controlFactors,
 		NoiseFactors:    noiseFactors,
 		Goal:            goal,
@@ -40,10 +84,19 @@ func NewExperimentUsingArray(goal OptimizationGoal, controlFactors []Factor, ort
 	}, nil
 }
 
+// Params converts a Trial's Control map into a value of type P using the
+// pre-built converter function. P's exported float64 fields are populated from
+// the corresponding Control map entries (keyed by field name).
+func (e *Experiment[P]) Params(trial Trial) P {
+	if e.controlAs == nil {
+		var zero P
+		return zero
+	}
+	return e.controlAs(trial)
+}
+
 // AddResult records the observations from a completed trial into the experiment's results.
-// trial: The specific trial that was executed.
-// observations: Slice of measured outcomes for this trial.
-func (e *Experiment) AddResult(trial Trial, observations []float64) {
+func (e *Experiment[P]) AddResult(trial Trial, observations []float64) {
 	e.Results = append(e.Results, TrialResult{
 		Trial:        trial,
 		Observations: observations,
@@ -51,16 +104,7 @@ func (e *Experiment) AddResult(trial Trial, observations []float64) {
 }
 
 // Analyze performs a full Taguchi analysis on the collected trial results.
-// Steps:
-// 1. Compute SNR for each trial.
-// 2. Calculate average SNR per orthogonal array row.
-// 3. Compute grand mean and total sum of squares.
-// 4. Perform ANOVA: factor sum of squares, degrees of freedom, mean squares, F-ratios.
-// 5. Determine main effects (average SNR per factor level).
-// 6. Compute optimal factor levels based on maximum effect.
-// 7. Calculate contribution percentages for each factor.
-// Returns an AnalysisResult with all computed statistics, optimal levels, and main effects.
-func (e *Experiment) Analyze() AnalysisResult {
+func (e *Experiment[P]) Analyze() AnalysisResult {
 	oaRows := len(e.OrthogonalArray)
 	grandMean := 0.0
 	oaSNR := make([]float64, oaRows)

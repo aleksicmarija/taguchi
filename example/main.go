@@ -115,31 +115,41 @@ func isSorted(arr []int) bool {
 }
 
 // ============================================================
+// FACTOR & PARAM STRUCTS (typed config for Taguchi factors)
+// ============================================================
+
+type SortFactors struct {
+	MaxWorkers []float64
+	Algorithm  []float64
+}
+
+type SortParams struct {
+	MaxWorkers float64
+	Algorithm  float64
+}
+
+// ============================================================
 // MAIN EXPERIMENT
 // ============================================================
 
 func main() {
-	workerFactor := taguchi.Factor{
-		Name:   "MaxWorkers",
-		Levels: []float64{6, 9, 15, 20},
-	}
-
-	algorithmFactor := taguchi.Factor{
-		Name:   "Algorithm",
-		Levels: []float64{0, 1},
-	}
-
 	noise := taguchi.NoiseFactor{
 		Name:   "DataPattern",
 		Levels: []float64{0, 1, 2, 3, 4},
 	}
 
-	exp, _ := taguchi.NewExperiment(
+	exp, err := taguchi.NewExperiment[SortFactors, SortParams](
 		taguchi.SmallerTheBetter{},
-		[]taguchi.Factor{workerFactor, algorithmFactor},
+		SortFactors{
+			MaxWorkers: []float64{6, 9, 15, 20},
+			Algorithm:  []float64{0, 1},
+		},
 		taguchi.L8,
 		[]taguchi.NoiseFactor{noise},
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	dataSize := 2_000_000
 	patterns := []DataPattern{Random, Sorted, ReverseSorted, ManyDuplicates, NearlySorted}
@@ -149,8 +159,9 @@ func main() {
 	}
 
 	for _, trial := range exp.GenerateTrials() {
-		workers := int(trial.Control["MaxWorkers"])
-		alg := SortAlgorithm(trial.Control["Algorithm"])
+		params := exp.Params(trial)
+		workers := int(params.MaxWorkers)
+		alg := SortAlgorithm(params.Algorithm)
 		pattern := DataPattern(trial.Noise["DataPattern"])
 
 		data := make([]int, dataSize)

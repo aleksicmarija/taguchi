@@ -1,16 +1,16 @@
 package taguchi
 
-type OrthogonalArrayType string
+type ArrayType string
 
 const (
-	L4  OrthogonalArrayType = "L4"
-	L8  OrthogonalArrayType = "L8"
-	L9  OrthogonalArrayType = "L9"
-	L16 OrthogonalArrayType = "L16"
-	L18 OrthogonalArrayType = "L18"
+	L4  ArrayType = "L4"
+	L8  ArrayType = "L8"
+	L9  ArrayType = "L9"
+	L16 ArrayType = "L16"
+	L18 ArrayType = "L18"
 )
 
-var StandardArrays = map[OrthogonalArrayType][][]int{
+var StandardArrays = map[ArrayType][][]int{
 	L4: {
 		{1, 1, 1},
 		{1, 2, 2},
