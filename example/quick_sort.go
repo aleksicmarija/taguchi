@@ -5,85 +5,74 @@ import (
 	"sync"
 )
 
-// ============================================================
-// PARALLEL QUICK SORT
-// ============================================================
+const sortThreshold = 2048
 
+type sortJob struct {
+	lo, hi int
+}
+
+// ParallelQuickSort performs a parallel quicksort using the specified number of workers.
 func ParallelQuickSort(arr []int, workers int) {
 	if len(arr) <= 1 {
 		return
 	}
 
-	jobs := make(chan job, workers)
+	jobs := make(chan sortJob, workers)
 	var wg sync.WaitGroup
 
-	worker := func() {
-		for j := range jobs {
-			quickSortJob(arr, j.lo, j.hi, &wg, jobs)
-			wg.Done()
-		}
-	}
-
-	for i := 0; i < workers; i++ {
-		go worker()
-	}
+	spawnWorkers(workers, jobs, arr, &wg)
 
 	wg.Add(1)
-	jobs <- job{0, len(arr) - 1}
+	jobs <- sortJob{0, len(arr) - 1}
 	wg.Wait()
 
 	close(jobs)
 }
 
-// ============================================================
-// QUICK SORT JOB
-// ============================================================
+func spawnWorkers(count int, jobs chan sortJob, arr []int, wg *sync.WaitGroup) {
+	for i := 0; i < count; i++ {
+		go func() {
+			for j := range jobs {
+				quickSortPartition(arr, j.lo, j.hi, wg, jobs)
+				wg.Done()
+			}
+		}()
+	}
+}
 
-func quickSortJob(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- job) {
+func quickSortPartition(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- sortJob) {
 	if lo >= hi {
 		return
-
 	}
 
-	// Small partitions → Using built-in sort
-	if hi-lo < 2048 {
+	// Use built-in sort for small partitions
+	if hi-lo < sortThreshold {
 		sort.Ints(arr[lo : hi+1])
 		return
-
 	}
 
-	p := partitionMedian(arr, lo, hi)
-	// Left partition
+	p := partition(arr, lo, hi)
 	submitJob(arr, lo, p-1, wg, jobs)
-	// Right partition
 	submitJob(arr, p+1, hi, wg, jobs)
 }
 
-// ============================================================
-// JOB SUBMISSION
-// ============================================================
-
-func submitJob(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- job) {
+func submitJob(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- sortJob) {
 	if lo >= hi {
 		return
 	}
 
 	wg.Add(1)
 	select {
-	case jobs <- job{lo, hi}:
-	// handled by worker
+	case jobs <- sortJob{lo, hi}:
 	default:
-		// fallback: run synchronously
-		quickSortJob(arr, lo, hi, wg, jobs)
+		// Fallback: execute synchronously if channel is full
+		quickSortPartition(arr, lo, hi, wg, jobs)
 		wg.Done()
 	}
 }
 
-// ============================================================
-// MEDIAN-OF-THREE PARTITION
-// ============================================================
-
-func partitionMedian(arr []int, lo, hi int) int {
+// partition uses median-of-three pivot selection for better performance.
+func partition(arr []int, lo, hi int) int {
 	mid := lo + (hi-lo)/2
 
 	// Order lo, mid, hi
