@@ -4,7 +4,7 @@ package taguchi
 // - ANOVAResult
 // - mainEffects per factor
 // - SNR per factor (same as mainEffects for convenience)
-func (e *Experiment) computeANOVA(oaSNR []float64, grandMean float64) (ANOVAResult, map[string][]float64, map[string][]float64) {
+func (e *Experiment[P]) computeANOVA(oaSNR []float64, grandMean float64) (ANOVAResult, map[string][]float64, map[string][]float64) {
 	oaRows := len(e.OrthogonalArray)
 	totalSS := 0.0
 	for _, sn := range oaSNR {
