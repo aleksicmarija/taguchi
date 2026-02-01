@@ -11,6 +11,12 @@ import (
 
 const dataSize = 2_000_000
 
+type ExperimentFactors struct {
+	MaxWorkers []float64
+	Algorithm  []float64
+	GOMAXPROCS []float64
+}
+
 func main() {
 	exp, err := createExperiment()
 	if err != nil {
@@ -24,21 +30,19 @@ func main() {
 	taguchi.PrintAnalysisReport(results)
 }
 
-func createExperiment() (*taguchi.Experiment, error) {
-	factors := []taguchi.Factor{
-		{Name: "MaxWorkers", Levels: []float64{1, 20}},
-		{Name: "Algorithm", Levels: []float64{0, 1}},
-		{Name: "GOMAXPROCS", Levels: []float64{4, 8}},
+func createExperiment() (*taguchi.Experiment[ExperimentFactors], error) {
+	factors := ExperimentFactors{
+		MaxWorkers: []float64{1, 20},
+		Algorithm:  []float64{0, 1},
+		GOMAXPROCS: []float64{4, 8},
 	}
 
 	noise := []taguchi.NoiseFactor{
 		{Name: "DataPattern", Levels: []float64{0, 1, 2, 3, 4}},
 	}
 
-	return taguchi.NewExperiment(
-		taguchi.SmallerTheBetter,
-		0,
-		0.05,
+	return taguchi.NewExperiment[ExperimentFactors, ExperimentFactors](
+		&taguchi.SmallerTheBetter{},
 		factors,
 		"L4",
 		noise,
@@ -56,7 +60,7 @@ func prepareDatasets(size int) map[DataPattern][]int {
 	return datasets
 }
 
-func runExperiment(exp *taguchi.Experiment, datasets map[DataPattern][]int) {
+func runExperiment(exp *taguchi.Experiment[ExperimentFactors], datasets map[DataPattern][]int) {
 	for _, trial := range exp.GenerateTrials() {
 		tc := trialConfig{trial: trial, datasets: datasets}
 		runTrial(exp, tc)
@@ -68,7 +72,7 @@ type trialConfig struct {
 	datasets map[DataPattern][]int
 }
 
-func runTrial(exp *taguchi.Experiment, tc trialConfig) {
+func runTrial(exp *taguchi.Experiment[ExperimentFactors], tc trialConfig) {
 	runtime.GOMAXPROCS(int(tc.trial.Control["GOMAXPROCS"]))
 
 	workers := int(tc.trial.Control["MaxWorkers"])

@@ -27,61 +27,74 @@ go get github.com/marijaaleksic/taguchi
 package main
 
 import (
-    "fmt"
-    "github.com/marijaaleksic/taguchi"
+	"fmt"
+	"log"
+	"runtime"
+	"time"
+
+	"github.com/marijaaleksic/taguchi"
 )
 
+type ExperimentFactors struct {
+	MaxWorkers []float64
+	Algorithm  []float64
+	GOMAXPROCS []float64
+}
+
 func main() {
-    // Define control factors (what you can control)
-    numThreads := taguchi.Factor{
-        Name:   "NumThreads",
-        Levels: []float64{1, 4, 8},
-    }
-    
-    bufferSize := taguchi.Factor{
-        Name:   "BufferSize",
-        Levels: []float64{1024, 4096, 8192},
-    }
-    
-    // Define noise factors (environmental conditions)
-    cpuLoad := taguchi.NoiseFactor{
-        Name:   "CPULoad",
-        Levels: []float64{0.0, 0.5, 1.0},
-    }
-    
-    // Create experiment with L9 orthogonal array
-    exp, err := taguchi.NewExperiment(
-        taguchi.SmallerTheBetter,  // Goal: minimize response time
-        0.0,                        // Target (not used for SmallerTheBetter)
-        0.05,                       // Pooling threshold for ANOVA
-        []taguchi.Factor{numThreads, bufferSize},
-        "L9",                       // Orthogonal array
-        []taguchi.NoiseFactor{cpuLoad},
-    )
-    if err != nil {
-        panic(err)
-    }
-    
-    // Generate all trial combinations
-    trials := exp.GenerateTrials()
-    
-    // Run experiments and collect observations
-    for _, trial := range trials {
-        numThreads := int(trial.Control["NumThreads"])
-        bufferSize := int(trial.Control["BufferSize"])
-        cpuLoad := trial.Noise["CPULoad"]
-        
-        // Run your experiment here
-        observations := runYourExperiment(numThreads, bufferSize, cpuLoad)
-        
-        exp.AddResult(trial, observations)
-    }
-    
-    // Analyze results
-    results := exp.Analyze()
-    
-    // Display optimal settings
-    taguchi.PrintAnalysisReport(results)
+	// Define control factors as a struct with []float64 fields
+	factors := ExperimentFactors{
+		MaxWorkers: []float64{1, 20},
+		Algorithm:  []float64{0, 1},
+		GOMAXPROCS: []float64{4, 8},
+	}
+
+	// Define noise factors (environmental conditions)
+	noise := []taguchi.NoiseFactor{
+		{Name: "DataPattern", Levels: []float64{0, 1, 2, 3, 4}},
+	}
+
+	// Create experiment with L4 orthogonal array
+	exp, err := taguchi.NewExperiment[ExperimentFactors, ExperimentFactors](
+		&taguchi.SmallerTheBetter{},
+		factors,
+		"L4",
+		noise,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Generate all trial combinations
+	trials := exp.GenerateTrials()
+
+	// Run experiments and collect observations
+	for _, trial := range trials {
+		params := exp.Params(trial)  // Convert trial to factors struct
+		
+		// Access factor values
+		workers := int(params.MaxWorkers)
+		alg := int(params.Algorithm)
+		gomaxprocs := int(params.GOMAXPROCS)
+		pattern := int(trial.Noise["DataPattern"])
+
+		// Run your experiment
+		runtime.GOMAXPROCS(gomaxprocs)
+		duration := runYourExperiment(workers, alg, pattern)
+		
+		// Record observations
+		exp.AddResult(trial, []float64{float64(duration.Microseconds())})
+	}
+
+	// Analyze results
+	results := exp.Analyze()
+	taguchi.PrintAnalysisReport(results)
+}
+
+func runYourExperiment(workers, alg, pattern int) time.Duration {
+	start := time.Now()
+	// Your experiment logic here
+	return time.Since(start)
 }
 ```
 
@@ -111,12 +124,14 @@ Orthogonal arrays enable efficient experiment design by testing only a strategic
 
 ## API Reference
 
+## API Reference
+
 ### Types
 
-#### `Factor`
-Represents a controllable input variable.
+#### `ControlFactor`
+Represents a controllable input variable (when using manual factor construction).
 ```go
-type Factor struct {
+type ControlFactor struct {
     Name   string      // Factor identifier
     Levels []float64   // Possible values
 }
@@ -141,48 +156,125 @@ type Trial struct {
 }
 ```
 
+#### `TrialResult`
+Records observations from a completed trial.
+```go
+type TrialResult struct {
+    Trial        Trial           // The experimental configuration
+    Observations []float64       // Measured results
+}
+```
+
 #### `AnalysisResult`
 Complete analysis output.
 ```go
 type AnalysisResult struct {
-    OptimalLevels  map[string]float64      // Best factor levels
-    SNR            map[string][]float64    // SNR for each level
-    MainEffects    map[string][]float64    // Average SNR per level
-    Contributions  map[string]float64      // Factor importance (%)
-    ANOVA          ANOVAResult             // Detailed statistics
+    OptimalLevels map[string]float64      // Best factor levels
+    SNR           map[string][]float64    // SNR for each level
+    MainEffects   map[string][]float64    // Average SNR per level
+    Contributions map[string]float64      // Factor importance (%)
+    ANOVA         ANOVAResult             // Detailed statistics
+}
+```
+
+#### `ANOVAResult`
+Detailed ANOVA statistics.
+```go
+type ANOVAResult struct {
+    FactorSS      map[string]float64  // Sum of squares per factor
+    FactorDF      map[string]int      // Degrees of freedom per factor
+    FactorMS      map[string]float64  // Mean square per factor
+    FactorF       map[string]float64  // F-ratio per factor
+    ErrorSS       float64             // Sum of squares for error
+    ErrorDF       int                 // Degrees of freedom for error
+    ErrorMS       float64             // Mean square error
+    PooledFactors []string            // Factors pooled during analysis
+}
+```
+
+#### `OptimizationGoal`
+Interface for quality characteristics.
+```go
+type OptimizationGoal interface {
+    CalculateSNR(observations []float64) float64
+    String() string
+}
+
+// Built-in implementations:
+type SmallerTheBetter struct{}      // Minimize response
+type LargerTheBetter struct{}       // Maximize response
+type NominalTheBest struct {
+    Target float64                  // Achieve target value
 }
 ```
 
 ### Methods
 
-#### `NewExperiment`
+#### `NewExperiment` (Generic with Struct Factors)
 ```go
-func NewExperiment(
+func NewExperiment[F any, P any](
     goal OptimizationGoal,
-    target float64,
-    poolingThreshold float64,
-    controlFactors []Factor,
+    factors F,
     arrayName string,
     noiseFactors []NoiseFactor,
-) (*Experiment, error)
+) (*Experiment[P], error)
 ```
-Creates a new Taguchi experiment with specified parameters.
+Creates a new Taguchi experiment. `F` is the factors struct type (inferred from the factors argument), `P` is the params struct type for converting trials to factor values.
+
+#### `NewExperimentUsingArray` (Generic with Custom Array)
+```go
+func NewExperimentUsingArray[F any, P any](
+    goal OptimizationGoal,
+    factors F,
+    orthogonalArray [][]int,
+    noiseFactors []NoiseFactor,
+) (*Experiment[P], error)
+```
+Creates a new Taguchi experiment with a user-provided custom orthogonal array.
+
+#### `NewExperimentFromFactors` (Manual Factor Construction)
+```go
+func NewExperimentFromFactors(
+    goal OptimizationGoal,
+    controlFactors []ControlFactor,
+    arrayName string,
+    noiseFactors []NoiseFactor,
+) (*Experiment[struct{}], error)
+```
+Creates a new Taguchi experiment from pre-built ControlFactor slices instead of struct fields.
+
+#### `NewExperimentFromFactorsUsingArray` (Manual with Custom Array)
+```go
+func NewExperimentFromFactorsUsingArray(
+    goal OptimizationGoal,
+    controlFactors []ControlFactor,
+    orthogonalArray [][]int,
+    noiseFactors []NoiseFactor,
+) (*Experiment[struct{}], error)
+```
+Creates a new Taguchi experiment from pre-built ControlFactor slices with a custom orthogonal array.
+
+#### `Params`
+```go
+func (e *Experiment[P]) Params(trial Trial) P
+```
+Converts a Trial's Control map into a value of type P. Exported float64 fields are populated from control factor values.
 
 #### `GenerateTrials`
 ```go
-func (e *Experiment) GenerateTrials() []Trial
+func (e *Experiment[P]) GenerateTrials() []Trial
 ```
 Generates all trial combinations from the orthogonal array and noise factors.
 
 #### `AddResult`
 ```go
-func (e *Experiment) AddResult(trial Trial, observations []float64)
+func (e *Experiment[P]) AddResult(trial Trial, observations []float64)
 ```
 Records experimental observations for a trial.
 
 #### `Analyze`
 ```go
-func (e *Experiment) Analyze() AnalysisResult
+func (e *Experiment[P]) Analyze() AnalysisResult
 ```
 Performs complete statistical analysis including ANOVA and optimal level determination.
 
@@ -190,19 +282,18 @@ Performs complete statistical analysis including ANOVA and optimal level determi
 ```go
 func PrintAnalysisReport(result AnalysisResult)
 ```
-
-Prints Analysis report.
+Prints a formatted analysis report to stdout.
 
 ## Example: Parallel Sorting Optimization
 
-See `examples/main.go` for a complete example that optimizes parallel sorting algorithms by varying:
+See `example/main.go` for a complete example that optimizes parallel sorting algorithms by varying:
 
-- **Control Factors**: Number of goroutines, sorting algorithm (QuickSort, RadixSort)
-- **Noise Factors**: Data patterns
+- **Control Factors**: Number of workers, sorting algorithm (QuickSort, RadixSort), GOMAXPROCS
+- **Noise Factors**: Data patterns (random, sorted, reverse sorted, many duplicates, nearly sorted)
 - **Goal**: Minimize sorting time
 
 The example demonstrates:
-- Setting up a multi-factor experiment
+- Defining control factors as a struct with `[]float64` fields
 - Running trials with environmental noise
 - Analyzing results to find optimal configurations
 - Interpreting ANOVA and contribution percentages
