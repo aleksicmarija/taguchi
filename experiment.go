@@ -105,12 +105,30 @@ func (e *Experiment[P]) AddResult(trial Trial, observations []float64) {
 
 // Analyze performs a full Taguchi analysis on the collected trial results.
 func (e *Experiment[P]) Analyze() AnalysisResult {
+	oaSNR, grandMean := e.computeOASNR()
+	anova, mainEffects, snrPerFactor := e.computeANOVA(oaSNR, grandMean)
+	optimalLevels := e.findOptimalLevels(mainEffects)
+	contributions := computeContributions(anova)
+
+	return AnalysisResult{
+		OptimalLevels: optimalLevels,
+		SNR:           snrPerFactor,
+		MainEffects:   mainEffects,
+		Contributions: contributions,
+		ANOVA:         anova,
+	}
+}
+
+// computeOASNR computes the Signal-to-Noise ratio for each orthogonal array row
+// by collecting all observations across noise conditions and computing SNR once
+// on the combined set. Returns the per-row SNR values and the grand mean.
+func (e *Experiment[P]) computeOASNR() ([]float64, float64) {
 	oaRows := len(e.OrthogonalArray)
-	grandMean := 0.0
 	oaSNR := make([]float64, oaRows)
+	grandMean := 0.0
+
 	for i := 0; i < oaRows; i++ {
-		sum := 0.0
-		count := 0
+		var allObs []float64
 		for _, r := range e.Results {
 			match := true
 			for j, factor := range e.ControlFactors {
@@ -120,12 +138,11 @@ func (e *Experiment[P]) Analyze() AnalysisResult {
 				}
 			}
 			if match {
-				sum += e.Goal.CalculateSNR(r.Observations)
-				count++
+				allObs = append(allObs, r.Observations...)
 			}
 		}
-		if count > 0 {
-			oaSNR[i] = sum / float64(count)
+		if len(allObs) > 0 {
+			oaSNR[i] = e.Goal.CalculateSNR(allObs)
 		} else {
 			oaSNR[i] = 0
 		}
@@ -133,82 +150,12 @@ func (e *Experiment[P]) Analyze() AnalysisResult {
 	}
 	grandMean /= float64(oaRows)
 
-	totalSS := 0.0
-	for _, sn := range oaSNR {
-		totalSS += (sn - grandMean) * (sn - grandMean)
-	}
+	return oaSNR, grandMean
+}
 
-	anova := ANOVAResult{
-		FactorSS: make(map[string]float64),
-		FactorDF: make(map[string]int),
-		FactorMS: make(map[string]float64),
-		FactorF:  make(map[string]float64),
-	}
-	mainEffects := map[string][]float64{}
-	snrPerFactor := map[string][]float64{}
-
-	for _, factor := range e.ControlFactors {
-		levelMeans := make([]float64, len(factor.Levels))
-		levelCounts := make([]int, len(factor.Levels))
-
-		for i := 0; i < oaRows; i++ {
-			levelIdx := -1
-			for j, f := range e.ControlFactors {
-				if f.Name == factor.Name {
-					levelIdx = e.OrthogonalArray[i][j] - 1
-					break
-				}
-			}
-			if levelIdx >= 0 && levelIdx < len(factor.Levels) {
-				levelMeans[levelIdx] += oaSNR[i]
-				levelCounts[levelIdx]++
-			}
-		}
-
-		for li := range levelMeans {
-			if levelCounts[li] > 0 {
-				levelMeans[li] /= float64(levelCounts[li])
-			} else {
-				levelMeans[li] = 0
-			}
-		}
-
-		ss := 0.0
-		for li := range factor.Levels {
-			ss += float64(levelCounts[li]) * (levelMeans[li] - grandMean) * (levelMeans[li] - grandMean)
-		}
-		dfs := len(factor.Levels) - 1
-		anova.FactorSS[factor.Name] = ss
-		anova.FactorDF[factor.Name] = dfs
-		mainEffects[factor.Name] = levelMeans
-		snrPerFactor[factor.Name] = levelMeans
-	}
-
-	errorDF := oaRows - 1
-	for _, df := range anova.FactorDF {
-		errorDF -= df
-	}
-
-	if errorDF < 1 {
-		errorDF = 1
-	}
-
-	errorSS := totalSS
-	for _, ss := range anova.FactorSS {
-		errorSS -= ss
-	}
-	errorMS := errorSS / float64(errorDF)
-	anova.ErrorDF = errorDF
-	anova.ErrorSS = errorSS
-	anova.ErrorMS = errorMS
-
-	for f, msSS := range anova.FactorSS {
-		df := anova.FactorDF[f]
-		ms := msSS / float64(df)
-		anova.FactorMS[f] = ms
-		anova.FactorF[f] = ms / errorMS
-	}
-
+// findOptimalLevels determines the best level for each control factor by
+// selecting the level with the highest mean SNR (main effect).
+func (e *Experiment[P]) findOptimalLevels(mainEffects map[string][]float64) map[string]float64 {
 	optimalLevels := map[string]float64{}
 	for _, factor := range e.ControlFactors {
 		levels := mainEffects[factor.Name]
@@ -222,27 +169,5 @@ func (e *Experiment[P]) Analyze() AnalysisResult {
 		}
 		optimalLevels[factor.Name] = factor.Levels[bestLevel]
 	}
-
-	totalFactorSS := 0.0
-	for _, ss := range anova.FactorSS {
-		totalFactorSS += ss
-	}
-	contributions := map[string]float64{}
-	if totalFactorSS > 0 {
-		for f, ss := range anova.FactorSS {
-			contributions[f] = (ss / totalFactorSS) * 100
-		}
-	} else {
-		for f := range anova.FactorSS {
-			contributions[f] = 0
-		}
-	}
-
-	return AnalysisResult{
-		OptimalLevels: optimalLevels,
-		SNR:           snrPerFactor,
-		MainEffects:   mainEffects,
-		Contributions: contributions,
-		ANOVA:         anova,
-	}
+	return optimalLevels
 }
