@@ -88,16 +88,25 @@ func (e *Experiment[P]) computeANOVA(oaSNR []float64, grandMean float64) (ANOVAR
 }
 
 // computeContributions calculates the percentage contribution of each factor
-// based on the ratio of its sum of squares to the total factor sum of squares.
+// and the error term based on the ratio of each sum of squares to the total SS
+// (factor SS + error SS). All contributions sum to 100%.
 func computeContributions(anova ANOVAResult) map[string]float64 {
 	totalFactorSS := 0.0
 	for _, ss := range anova.FactorSS {
 		totalFactorSS += ss
 	}
+
+	// Clamp negative ErrorSS from floating-point rounding to zero.
+	errorSS := anova.ErrorSS
+	if errorSS < 0 {
+		errorSS = 0
+	}
+
+	totalSS := totalFactorSS + errorSS
 	contributions := map[string]float64{}
-	if totalFactorSS > 0 {
+	if totalSS > 0 {
 		for f, ss := range anova.FactorSS {
-			contributions[f] = (ss / totalFactorSS) * 100
+			contributions[f] = (ss / totalSS) * 100
 		}
 	} else {
 		for f := range anova.FactorSS {
