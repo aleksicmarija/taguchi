@@ -1,7 +1,7 @@
 package main
 
 import (
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -17,7 +17,7 @@ func ParallelQuickSort(arr []int, workers int) {
 		return
 	}
 
-	jobs := make(chan sortJob, workers)
+	jobs := make(chan sortJob, workers*128)
 	var wg sync.WaitGroup
 
 	spawnWorkers(workers, jobs, arr, &wg)
@@ -47,13 +47,13 @@ func quickSortPartition(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- s
 
 	// Use built-in sort for small partitions
 	if hi-lo < sortThreshold {
-		sort.Ints(arr[lo : hi+1])
+		slices.Sort(arr[lo : hi+1])
 		return
 	}
 
-	p := partition(arr, lo, hi)
-	submitJob(arr, lo, p-1, wg, jobs)
-	submitJob(arr, p+1, hi, wg, jobs)
+	lt, gt := partition3Way(arr, lo, hi)
+	submitJob(arr, lo, lt-1, wg, jobs)
+	submitJob(arr, gt+1, hi, wg, jobs)
 }
 
 func submitJob(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- sortJob) {
@@ -71,11 +71,12 @@ func submitJob(arr []int, lo, hi int, wg *sync.WaitGroup, jobs chan<- sortJob) {
 	}
 }
 
-// partition uses median-of-three pivot selection for better performance.
-func partition(arr []int, lo, hi int) int {
+// partition3Way uses the Dutch National Flag algorithm with median-of-three pivot selection.
+// Returns (lt, gt) such that arr[lo..lt-1] < pivot, arr[lt..gt] == pivot, arr[gt+1..hi] > pivot.
+func partition3Way(arr []int, lo, hi int) (int, int) {
 	mid := lo + (hi-lo)/2
 
-	// Order lo, mid, hi
+	// Median-of-three pivot selection
 	if arr[mid] < arr[lo] {
 		arr[mid], arr[lo] = arr[lo], arr[mid]
 	}
@@ -85,18 +86,20 @@ func partition(arr []int, lo, hi int) int {
 	if arr[hi] < arr[mid] {
 		arr[hi], arr[mid] = arr[mid], arr[hi]
 	}
+	pivot := arr[mid]
 
-	// Move pivot to end
-	arr[mid], arr[hi] = arr[hi], arr[mid]
-	pivot := arr[hi]
-
-	i := lo
-	for j := lo; j < hi; j++ {
-		if arr[j] <= pivot {
-			arr[i], arr[j] = arr[j], arr[i]
+	lt, i, gt := lo, lo, hi
+	for i <= gt {
+		if arr[i] < pivot {
+			arr[lt], arr[i] = arr[i], arr[lt]
+			lt++
+			i++
+		} else if arr[i] > pivot {
+			arr[i], arr[gt] = arr[gt], arr[i]
+			gt--
+		} else {
 			i++
 		}
 	}
-	arr[i], arr[hi] = arr[hi], arr[i]
-	return i
+	return lt, gt
 }
