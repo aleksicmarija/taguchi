@@ -31,6 +31,13 @@ func main() {
 }
 
 func createExperiment() (*taguchi.Experiment[ExperimentFactors], error) {
+	// Note: For a more realistic and informative test, it would make more sense
+	// to treat `GOMAXPROCS` as a control factor that spans larger core counts
+	// (for example 8, 16, 32) and to add another control factor representing
+	// a two-core configuration where those two cores are fully isolated
+	// (dedicated CPUs). That setup better evaluates scalability
+	// versus isolation effects; the example keeps things simple and doesn't
+	// model that complexity.
 	factors := ExperimentFactors{
 		MaxWorkers: []float64{1, 20},
 		Algorithm:  []float64{0, 1},

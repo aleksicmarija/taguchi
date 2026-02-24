@@ -124,8 +124,6 @@ Orthogonal arrays enable efficient experiment design by testing only a strategic
 
 ## API Reference
 
-## API Reference
-
 ### Types
 
 #### `ControlFactor`
@@ -291,6 +289,8 @@ See `example/main.go` for a complete example that optimizes parallel sorting alg
 - **Control Factors**: Number of workers, sorting algorithm (QuickSort, RadixSort), GOMAXPROCS
 - **Noise Factors**: Data patterns (random, sorted, reverse sorted, many duplicates, nearly sorted)
 - **Goal**: Minimize sorting time
+
+Note: For a more realistic and informative test, it would make more sense to treat `GOMAXPROCS` as a control factor that spans larger core counts (for example 8, 16, 32) and to add another control factor representing a two-core configuration where those two cores are fully isolated (dedicated CPUs). That setup better evaluates scalability versus isolation effects; the example keeps things simple and doesn't model that complexity.
 
 The example demonstrates:
 - Defining control factors as a struct with `[]float64` fields
