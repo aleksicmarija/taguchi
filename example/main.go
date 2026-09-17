@@ -6,119 +6,76 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/marijaaleksic/taguchi"
+	"github.com/aleksicmarija/taguchi"
 )
 
 const dataSize = 2_000_000
 
-type ExperimentFactors struct {
-	MaxWorkers []float64
-	Algorithm  []float64
-	GOMAXPROCS []float64
-}
+// The noise factor. Every run is measured once per data pattern and the
+// observations are pooled into one SNR, so the chosen settings have to be
+// good across input orders rather than tuned to one of them.
+var patterns = []DataPattern{Random, Sorted, ReverseSorted, ManyDuplicates, NearlySorted}
 
 func main() {
-	exp, err := createExperiment()
+	// Note: a more informative experiment would treat GOMAXPROCS as a factor
+	// spanning larger core counts (for example 8, 16, 32) and add a factor
+	// for a two-core configuration with fully isolated, dedicated CPUs, to
+	// separate scalability from isolation effects. The example keeps things
+	// simple and does not model that.
+	workers := taguchi.NewFactor("MaxWorkers", 1, 20)
+	algorithm := taguchi.NewFactor("Algorithm", QuickSort, RadixSort)
+	procs := taguchi.NewFactor("GOMAXPROCS", 4, 8)
+
+	// Column 2 of L8 carries the interaction of columns 0 and 1, so the third
+	// factor goes on column 3 and any MaxWorkers x Algorithm interaction lands
+	// in the error term instead of being mistaken for a GOMAXPROCS effect.
+	design, err := taguchi.NewDesign(taguchi.L8.Select(0, 1, 3), workers, algorithm, procs)
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Println(design)
 
 	datasets := prepareDatasets(dataSize)
-	runExperiment(exp, datasets)
+	exp := taguchi.NewExperiment(design)
+	for _, run := range design.Runs() {
+		runtime.GOMAXPROCS(procs.Of(run))
+		for _, pattern := range patterns {
+			data := make([]int, dataSize)
+			copy(data, datasets[pattern])
 
-	results := exp.Analyze()
-	taguchi.PrintAnalysisReport(results)
-}
-
-func createExperiment() (*taguchi.Experiment[ExperimentFactors], error) {
-	// Note: For a more realistic and informative test, it would make more sense
-	// to treat `GOMAXPROCS` as a control factor that spans larger core counts
-	// (for example 8, 16, 32) and to add another control factor representing
-	// a two-core configuration where those two cores are fully isolated
-	// (dedicated CPUs). That setup better evaluates scalability
-	// versus isolation effects; the example keeps things simple and doesn't
-	// model that complexity.
-	factors := ExperimentFactors{
-		MaxWorkers: []float64{1, 20},
-		Algorithm:  []float64{0, 1},
-		GOMAXPROCS: []float64{4, 8},
+			elapsed := sortWith(algorithm.Of(run), data, workers.Of(run))
+			if !isSorted(data) {
+				log.Fatalf("%v pattern=%s: output is not sorted", run, pattern)
+			}
+			fmt.Printf("%v pattern=%s: %v\n", run, pattern, elapsed)
+			exp.Observe(run, float64(elapsed.Microseconds()))
+		}
 	}
 
-	noise := []taguchi.NoiseFactor{
-		{Name: "DataPattern", Levels: []float64{0, 1, 2, 3, 4}},
+	analysis, err := exp.Analyze(taguchi.SmallerTheBetter)
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	return taguchi.NewExperiment[ExperimentFactors, ExperimentFactors](
-		&taguchi.SmallerTheBetter{},
-		factors,
-		"L4",
-		noise,
-	)
+	fmt.Print("\n", analysis)
+	fmt.Printf("\nRecommendation: %s with MaxWorkers=%d on GOMAXPROCS=%d\n",
+		algorithm.Best(analysis), workers.Best(analysis), procs.Best(analysis))
 }
 
 func prepareDatasets(size int) map[DataPattern][]int {
-	patterns := []DataPattern{Random, Sorted, ReverseSorted, ManyDuplicates, NearlySorted}
 	datasets := make(map[DataPattern][]int, len(patterns))
-
 	for _, p := range patterns {
 		datasets[p] = generateData(size, p)
 	}
-
 	return datasets
 }
 
-func runExperiment(exp *taguchi.Experiment[ExperimentFactors], datasets map[DataPattern][]int) {
-	for _, trial := range exp.GenerateTrials() {
-		tc := trialConfig{trial: trial, datasets: datasets}
-		runTrial(exp, tc)
-	}
-}
-
-type trialConfig struct {
-	trial    taguchi.Trial
-	datasets map[DataPattern][]int
-}
-
-func runTrial(exp *taguchi.Experiment[ExperimentFactors], tc trialConfig) {
-	runtime.GOMAXPROCS(int(tc.trial.Control["GOMAXPROCS"]))
-
-	workers := int(tc.trial.Control["MaxWorkers"])
-	alg := SortAlgorithm(tc.trial.Control["Algorithm"])
-	pattern := DataPattern(tc.trial.Noise["DataPattern"])
-
-	data := make([]int, dataSize)
-	copy(data, tc.datasets[pattern])
-
-	printTrialStart(tc.trial, alg, workers, pattern)
-
-	dur := executeSortAlgorithm(alg, data, workers)
-
-	if !isSorted(data) {
-		panic("sorting failed")
-	}
-
-	exp.AddResult(tc.trial, []float64{float64(dur.Microseconds())})
-	printTrialResult(tc.trial, alg, workers, pattern, dur)
-}
-
-func executeSortAlgorithm(alg SortAlgorithm, data []int, workers int) time.Duration {
+func sortWith(alg SortAlgorithm, data []int, workers int) time.Duration {
 	start := time.Now()
-
 	switch alg {
 	case QuickSort:
 		ParallelQuickSort(data, workers)
 	case RadixSort:
 		ParallelRadixSort(data, workers)
 	}
-
 	return time.Since(start)
-}
-
-func printTrialStart(trial taguchi.Trial, alg SortAlgorithm, workers int, pattern DataPattern) {
-	fmt.Printf("Trial %d: %s | Workers=%d | GOMAXPROCS=%d | Pattern=%s\n",
-		trial.ID, alg, workers, int(trial.Control["GOMAXPROCS"]), pattern)
-}
-
-func printTrialResult(trial taguchi.Trial, alg SortAlgorithm, workers int, pattern DataPattern, dur time.Duration) {
-	fmt.Printf("  Result: %v\n\n", dur)
 }

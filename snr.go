@@ -1,71 +1,167 @@
 package taguchi
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
-// CalculateSNR computes the Signal-to-Noise ratio for "smaller-the-better" experiments.
-// Formula: -10 * log10(mean(y_i^2))
-func (s SmallerTheBetter) CalculateSNR(obs []float64) float64 {
-	if len(obs) == 0 {
-		return 0
-	}
-	msd := 0.0
-	for _, y := range obs {
-		msd += y * y
-	}
-	msd /= float64(len(obs))
-
-	if msd == 0 {
-		return math.Inf(1)
-	}
-	return -10 * math.Log10(msd)
+// SNR is a signal-to-noise ratio: a named function from the pooled
+// observations of one run to a value in decibels. Higher is better for
+// every SNR in this package. Name appears in reports.
+//
+// Of must refuse input for which the ratio is not defined rather than
+// substitute a value: the analysis of variance cannot recover from an
+// infinite or fabricated number. The ratios in this package return an error
+// wrapping ErrNoObservations, ErrDomain or ErrUndefinedSNR.
+//
+// A custom quality characteristic is an SNR literal:
+//
+//	p99 := taguchi.SNR{Name: "p99 latency", Of: func(y []float64) (float64, error) { ... }}
+type SNR struct {
+	Name string
+	Of   func(y []float64) (float64, error)
 }
 
-// String returns the human-readable name for the SmallerTheBetter goal.
-func (s SmallerTheBetter) String() string {
-	return "Smaller-the-Better"
+// SmallerTheBetter is the SNR for a response that should be as small as
+// possible, such as latency or defect count:
+//
+//	SNR = -10 log10( mean(y²) )
+//
+// Observations may be any finite number. The SNR is undefined when every
+// observation is zero.
+var SmallerTheBetter = SNR{Name: "smaller-the-better", Of: smallerTheBetter}
+
+// LargerTheBetter is the SNR for a response that should be as large as
+// possible, such as throughput or yield:
+//
+//	SNR = -10 log10( mean(1/y²) )
+//
+// Every observation must be positive.
+var LargerTheBetter = SNR{Name: "larger-the-better", Of: largerTheBetter}
+
+// NominalTheBest is Taguchi's SNR for a response that should sit on a target
+// with as little variation as possible:
+//
+//	SNR = 10 log10( (Sm - Ve) / (n Ve) )    with Sm = n mean(y)², Ve = var(y)
+//	    = 10 log10( mean(y)² / var(y) - 1/n )
+//
+// var is the sample variance with n-1 in the denominator. Subtracting
+// var(y)/n makes the numerator an unbiased estimate of the squared mean.
+// Minitab and JMP omit that term; the two differ by less than 0.05 dB once
+// the mean is more than ten standard errors from zero.
+//
+// The ratio does not depend on the target, which supports two-step
+// optimisation: first choose the levels that maximise the SNR, then move
+// the mean onto the target with a factor that affects only the mean. Use
+// NominalTheBestTarget to penalise distance from the target instead.
+//
+// A run needs at least two observations, a non-zero variance, and a mean
+// more than one standard error away from zero. A response centred near
+// zero should use NominalTheBestTarget.
+var NominalTheBest = SNR{Name: "nominal-the-best", Of: nominalTheBest}
+
+// NominalTheBestTarget returns the SNR for a response that should be as
+// close as possible to target, penalising bias and variation together:
+//
+//	SNR = -10 log10( mean((y - target)²) )
+//
+// The SNR is undefined when every observation equals the target exactly.
+func NominalTheBestTarget(target float64) SNR {
+	return SNR{
+		Name: fmt.Sprintf("nominal-the-best, target %v", target),
+		Of: func(y []float64) (float64, error) {
+			if err := checkObservations(y); err != nil {
+				return math.NaN(), err
+			}
+			if math.IsNaN(target) || math.IsInf(target, 0) {
+				return math.NaN(), fmt.Errorf("%w: target is %v", ErrDomain, target)
+			}
+			sum := 0.0
+			for _, v := range y {
+				d := v - target
+				sum += d * d
+			}
+			return decibels(sum / float64(len(y)))
+		},
+	}
 }
 
-// CalculateSNR computes the Signal-to-Noise ratio for "larger-the-better" experiments.
-// Formula: -10 * log10(mean(1/y_i^2))
-func (l LargerTheBetter) CalculateSNR(obs []float64) float64 {
-	if len(obs) == 0 {
-		return 0
+func smallerTheBetter(y []float64) (float64, error) {
+	if err := checkObservations(y); err != nil {
+		return math.NaN(), err
 	}
-	msd := 0.0
-	for _, y := range obs {
-		if y == 0 {
-			y = 1e-10 // avoid division by zero
+	sum := 0.0
+	for _, v := range y {
+		sum += v * v
+	}
+	return decibels(sum / float64(len(y)))
+}
+
+func largerTheBetter(y []float64) (float64, error) {
+	if err := checkObservations(y); err != nil {
+		return math.NaN(), err
+	}
+	sum := 0.0
+	for i, v := range y {
+		if v <= 0 {
+			return math.NaN(), fmt.Errorf("%w: larger-the-better needs positive observations, y[%d] = %v", ErrDomain, i, v)
 		}
-		msd += 1 / (y * y)
+		sum += 1 / (v * v)
 	}
-	msd /= float64(len(obs))
-	return -10 * math.Log10(msd)
+	return decibels(sum / float64(len(y)))
 }
 
-// String returns the human-readable name for the LargerTheBetter goal.
-func (l LargerTheBetter) String() string {
-	return "Larger-the-Better"
+func nominalTheBest(y []float64) (float64, error) {
+	if err := checkObservations(y); err != nil {
+		return math.NaN(), err
+	}
+	n := float64(len(y))
+	if n < 2 {
+		return math.NaN(), fmt.Errorf("%w: nominal-the-best needs at least 2 observations to estimate variance, got %d", ErrUndefinedSNR, len(y))
+	}
+	mean := 0.0
+	for _, v := range y {
+		mean += v
+	}
+	mean /= n
+	ss := 0.0
+	for _, v := range y {
+		ss += (v - mean) * (v - mean)
+	}
+	variance := ss / (n - 1)
+	if variance == 0 {
+		return math.NaN(), fmt.Errorf("%w: nominal-the-best with zero variance", ErrUndefinedSNR)
+	}
+	signal := mean*mean - variance/n
+	if signal <= 0 {
+		return math.NaN(), fmt.Errorf("%w: nominal-the-best: mean %v is within one standard error of zero; use NominalTheBestTarget", ErrUndefinedSNR, mean)
+	}
+	return finite(10 * math.Log10(signal/variance))
 }
 
-// CalculateSNR computes the Signal-to-Noise ratio for "nominal-the-best" experiments.
-// Formula: -10 * log10(mean((y_i - Target)^2))
-func (n NominalTheBest) CalculateSNR(obs []float64) float64 {
-	if len(obs) == 0 {
-		return 0
+func checkObservations(y []float64) error {
+	if len(y) == 0 {
+		return ErrNoObservations
 	}
-	msd := 0.0
-	for _, y := range obs {
-		msd += (y - n.Target) * (y - n.Target)
+	for i, v := range y {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("%w: y[%d] = %v", ErrDomain, i, v)
+		}
 	}
-	msd /= float64(len(obs))
+	return nil
+}
 
+// decibels converts a mean squared deviation to -10 log10(msd).
+func decibels(msd float64) (float64, error) {
 	if msd == 0 {
-		return math.Inf(1)
+		return math.NaN(), fmt.Errorf("%w: mean squared deviation is zero", ErrUndefinedSNR)
 	}
-	return -10 * math.Log10(msd)
+	return finite(-10 * math.Log10(msd))
 }
 
-// String returns the human-readable name for the NominalTheBest goal.
-func (n NominalTheBest) String() string {
-	return "Nominal-the-Best"
+func finite(snr float64) (float64, error) {
+	if math.IsNaN(snr) || math.IsInf(snr, 0) {
+		return math.NaN(), fmt.Errorf("%w: result is %v", ErrUndefinedSNR, snr)
+	}
+	return snr, nil
 }

@@ -1,289 +1,254 @@
 package taguchi
 
 import (
+	"errors"
 	"math"
+	"strings"
+	"sync"
 	"testing"
 )
 
-const float64EqualityThreshold = 1e-3
-
-func almostEqual(a, b float64) bool {
-	return math.Abs(a-b) < float64EqualityThreshold
+// twoRuns is the smallest design: one 2-level factor on a 2-run array.
+func twoRuns(t *testing.T) (*Design, *Factor[int]) {
+	t.Helper()
+	array := mustNewArray(t, "2x1", [][]int{{1}, {2}})
+	a := NewFactor("A", 1, 2)
+	design, err := NewDesign(array, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return design, a
 }
 
-// TestAnalyze_SNR_CombinesObservationsAcrossNoise verifies that SNR is computed
-// on the combined observations across all noise conditions for a given OA row,
-// not by averaging per-trial SNRs (which is incorrect due to log10 nonlinearity).
-//
-// Numerical example (SmallerTheBetter: -10*log10(mean(y²))):
-//
-//	OA row 0 with 2 noise trials: obs [2,4] and [6,8]
-//	Buggy:   avg(SNR([2,4]), SNR([6,8])) = avg(-10.0, -16.99) = -13.49
-//	Correct: SNR([2,4,6,8]) = -10*log10(mean(4+16+36+64)) = -10*log10(30) ≈ -14.771
-func TestAnalyze_SNR_CombinesObservationsAcrossNoise(t *testing.T) {
-	factors := []ControlFactor{
-		{Name: "A", Levels: []float64{1, 2}},
-	}
-	oa := [][]int{{1}, {2}} // 2 rows, 1 column
-	noise := []NoiseFactor{
-		{Name: "N", Levels: []float64{0, 1}},
-	}
+// The SNR of a run is computed on all its observations pooled together,
+// not by averaging the SNR of each noise condition; the log makes those
+// differ. Observations [2,4] and [6,8] pool to -10 log10(30) ≈ -14.77,
+// whereas averaging per-condition SNRs would give -13.49.
+func TestAnalyzePoolsObservationsAcrossConditions(t *testing.T) {
+	design, a := twoRuns(t)
+	exp := NewExperiment(design)
+	runs := design.Runs()
+	exp.Observe(runs[0], 2, 4)
+	exp.Observe(runs[0], 6, 8)
+	exp.Observe(runs[1], 1, 1)
+	exp.Observe(runs[1], 1, 1)
 
-	exp, err := NewExperimentFromFactorsUsingArray(SmallerTheBetter{}, factors, oa, noise)
+	an, err := exp.Analyze(SmallerTheBetter)
 	if err != nil {
-		t.Fatalf("NewExperimentFromFactorsUsingArray: %v", err)
+		t.Fatal(err)
 	}
-
-	trials := exp.GenerateTrials()
-	// trials: (A=1,N=0), (A=1,N=1), (A=2,N=0), (A=2,N=1)
-	if len(trials) != 4 {
-		t.Fatalf("expected 4 trials, got %d", len(trials))
+	if !near(an.Runs[0].SNR, -10*math.Log10(30), 1e-9) || an.Runs[0].N != 4 {
+		t.Errorf("run 0: %+v", an.Runs[0])
 	}
-
-	// A=1, N=0 → obs [2,4]
-	exp.AddResult(trials[0], []float64{2, 4})
-	// A=1, N=1 → obs [6,8]
-	exp.AddResult(trials[1], []float64{6, 8})
-	// A=2, N=0 → obs [1,1]
-	exp.AddResult(trials[2], []float64{1, 1})
-	// A=2, N=1 → obs [1,1]
-	exp.AddResult(trials[3], []float64{1, 1})
-
-	result := exp.Analyze()
-
-	// Expected SNR for A=1: SNR([2,4,6,8]) = -10*log10(mean(4+16+36+64))
-	//   = -10*log10((4+16+36+64)/4) = -10*log10(30) ≈ -14.771
-	expectedSNR_A1 := -10 * math.Log10(30)
-
-	// Expected SNR for A=2: SNR([1,1,1,1]) = -10*log10(mean(1+1+1+1))
-	//   = -10*log10(1) = 0
-	expectedSNR_A2 := -10 * math.Log10(1)
-
-	snrA, ok := result.SNR["A"]
-	if !ok {
-		t.Fatal("SNR for factor A not found")
+	if !near(an.Runs[1].SNR, 0, 1e-9) || an.Runs[1].N != 4 {
+		t.Errorf("run 1: %+v", an.Runs[1])
 	}
-	if len(snrA) != 2 {
-		t.Fatalf("expected 2 SNR levels for A, got %d", len(snrA))
+	e := an.Effects[0]
+	if e.Factor != "A" || e.Levels[0] != "1" || e.Levels[1] != "2" {
+		t.Errorf("labels: %q %v", e.Factor, e.Levels)
 	}
-
-	if !almostEqual(snrA[0], expectedSNR_A1) {
-		t.Errorf("SNR[A][0]: got %.4f, want %.4f", snrA[0], expectedSNR_A1)
+	if !near(e.Means[0], -10*math.Log10(30), 1e-9) || !near(e.Means[1], 0, 1e-9) || e.Best != 1 {
+		t.Errorf("means %v best %d", e.Means, e.Best)
 	}
-	if !almostEqual(snrA[1], expectedSNR_A2) {
-		t.Errorf("SNR[A][1]: got %.4f, want %.4f", snrA[1], expectedSNR_A2)
+	if a.Best(an) != 2 {
+		t.Errorf("Best = %d", a.Best(an))
 	}
-
-	// Optimal level for A should be 2.0 (SNR=0 > SNR≈-14.77)
-	if result.OptimalLevels["A"] != 2.0 {
-		t.Errorf("OptimalLevels[A]: got %v, want 2.0", result.OptimalLevels["A"])
+	if !an.Saturated() {
+		t.Error("one factor on two runs leaves no error DF")
 	}
 }
 
-// TestAnalyze_SNR_LargerTheBetter verifies combined-observations SNR for
-// LargerTheBetter: -10*log10(mean(1/y²)).
-func TestAnalyze_SNR_LargerTheBetter(t *testing.T) {
-	factors := []ControlFactor{
-		{Name: "A", Levels: []float64{1, 2}},
-	}
-	oa := [][]int{{1}, {2}}
-	noise := []NoiseFactor{
-		{Name: "N", Levels: []float64{0, 1}},
-	}
-
-	exp, err := NewExperimentFromFactorsUsingArray(LargerTheBetter{}, factors, oa, noise)
+func TestAnalyzeLargerTheBetterAndTarget(t *testing.T) {
+	design, a := twoRuns(t)
+	exp := NewExperiment(design)
+	runs := design.Runs()
+	exp.Observe(runs[0], 2, 4, 6, 8)
+	exp.Observe(runs[1], 10, 10, 10, 10)
+	an, err := exp.Analyze(LargerTheBetter)
 	if err != nil {
-		t.Fatalf("NewExperimentFromFactorsUsingArray: %v", err)
+		t.Fatal(err)
+	}
+	want0 := -10 * math.Log10((1.0/4+1.0/16+1.0/36+1.0/64)/4)
+	if !near(an.Effects[0].Means[0], want0, 1e-9) || !near(an.Effects[0].Means[1], 20, 1e-9) || a.Best(an) != 2 {
+		t.Errorf("LTB: %v best %d", an.Effects[0].Means, a.Best(an))
 	}
 
-	trials := exp.GenerateTrials()
-	// A=1, N=0 → obs [2,4]
-	exp.AddResult(trials[0], []float64{2, 4})
-	// A=1, N=1 → obs [6,8]
-	exp.AddResult(trials[1], []float64{6, 8})
-	// A=2, N=0 → obs [10,10]
-	exp.AddResult(trials[2], []float64{10, 10})
-	// A=2, N=1 → obs [10,10]
-	exp.AddResult(trials[3], []float64{10, 10})
-
-	result := exp.Analyze()
-
-	// A=1 combined: [2,4,6,8]
-	// mean(1/y²) = (1/4 + 1/16 + 1/36 + 1/64)/4
-	invSqSum := 1.0/4 + 1.0/16 + 1.0/36 + 1.0/64
-	expectedSNR_A1 := -10 * math.Log10(invSqSum/4)
-
-	// A=2 combined: [10,10,10,10]
-	// mean(1/y²) = 4*(1/100)/4 = 1/100
-	expectedSNR_A2 := -10 * math.Log10(1.0/100)
-
-	snrA := result.SNR["A"]
-	if !almostEqual(snrA[0], expectedSNR_A1) {
-		t.Errorf("SNR[A][0]: got %.4f, want %.4f", snrA[0], expectedSNR_A1)
+	exp = NewExperiment(design)
+	exp.Observe(runs[0], 3, 4, 6, 7)
+	exp.Observe(runs[1], 4, 6, 4, 6)
+	an, err = exp.Analyze(NominalTheBestTarget(5))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !almostEqual(snrA[1], expectedSNR_A2) {
-		t.Errorf("SNR[A][1]: got %.4f, want %.4f", snrA[1], expectedSNR_A2)
-	}
-
-	// A=2 has higher SNR → optimal
-	if result.OptimalLevels["A"] != 2.0 {
-		t.Errorf("OptimalLevels[A]: got %v, want 2.0", result.OptimalLevels["A"])
+	if !near(an.Effects[0].Means[0], -10*math.Log10(2.5), 1e-9) || !near(an.Effects[0].Means[1], 0, 1e-9) || a.Best(an) != 2 {
+		t.Errorf("NTB target: %v best %d", an.Effects[0].Means, a.Best(an))
 	}
 }
 
-// TestAnalyze_SNR_NominalTheBest verifies combined-observations SNR for
-// NominalTheBest: -10*log10(mean((y-target)²)).
-func TestAnalyze_SNR_NominalTheBest(t *testing.T) {
-	factors := []ControlFactor{
-		{Name: "A", Levels: []float64{1, 2}},
-	}
-	oa := [][]int{{1}, {2}}
-	noise := []NoiseFactor{
-		{Name: "N", Levels: []float64{0, 1}},
-	}
-
-	target := 5.0
-	exp, err := NewExperimentFromFactorsUsingArray(NominalTheBest{Target: target}, factors, oa, noise)
+func TestAnalyzeRefusesMissingRuns(t *testing.T) {
+	design, err := NewDesign(L4, NewFactor("A", 1, 2), NewFactor("B", 1, 2))
 	if err != nil {
-		t.Fatalf("NewExperimentFromFactorsUsingArray: %v", err)
+		t.Fatal(err)
 	}
-
-	trials := exp.GenerateTrials()
-	// A=1, N=0 → obs [3,4]
-	exp.AddResult(trials[0], []float64{3, 4})
-	// A=1, N=1 → obs [6,7]
-	exp.AddResult(trials[1], []float64{6, 7})
-	// A=2, N=0 → obs [5,5]
-	exp.AddResult(trials[2], []float64{5, 5})
-	// A=2, N=1 → obs [5,5]
-	exp.AddResult(trials[3], []float64{5, 5})
-
-	result := exp.Analyze()
-
-	// A=1 combined: [3,4,6,7], deviations from target=5: [-2,-1,1,2]
-	// mean((y-5)²) = (4+1+1+4)/4 = 2.5
-	expectedSNR_A1 := -10 * math.Log10(2.5)
-
-	// A=2 combined: [5,5,5,5], all exactly on target
-	// mean((y-5)²) = 0 → SNR = +Inf
-	expectedSNR_A2 := math.Inf(1)
-
-	snrA := result.SNR["A"]
-	if !almostEqual(snrA[0], expectedSNR_A1) {
-		t.Errorf("SNR[A][0]: got %.4f, want %.4f", snrA[0], expectedSNR_A1)
-	}
-	if !math.IsInf(snrA[1], 1) {
-		t.Errorf("SNR[A][1]: got %.4f, want +Inf", snrA[1])
-	}
-	_ = expectedSNR_A2
-
-	if result.OptimalLevels["A"] != 2.0 {
-		t.Errorf("OptimalLevels[A]: got %v, want 2.0", result.OptimalLevels["A"])
+	exp := NewExperiment(design)
+	runs := design.Runs()
+	exp.Observe(runs[0], 100)
+	exp.Observe(runs[2], 100)
+	_, err = exp.Analyze(SmallerTheBetter)
+	if !errors.Is(err, ErrNoObservations) || !strings.Contains(err.Error(), "[1 3]") {
+		t.Errorf("missing runs: %v", err)
 	}
 }
 
-// TestAnalyze_SingleTrialPerRow verifies the degenerate case with 1 noise level
-// where combined and per-trial SNR would produce the same result.
-func TestAnalyze_SingleTrialPerRow(t *testing.T) {
-	factors := []ControlFactor{
-		{Name: "A", Levels: []float64{1, 2}},
-	}
-	oa := [][]int{{1}, {2}}
-	noise := []NoiseFactor{
-		{Name: "N", Levels: []float64{0}},
-	}
-
-	exp, err := NewExperimentFromFactorsUsingArray(SmallerTheBetter{}, factors, oa, noise)
+func TestAnalyzeNamesTheRunAnSNRRejects(t *testing.T) {
+	design, err := NewDesign(L4, NewFactor("A", 1, 2))
 	if err != nil {
-		t.Fatalf("NewExperimentFromFactorsUsingArray: %v", err)
+		t.Fatal(err)
 	}
-
-	trials := exp.GenerateTrials()
-	if len(trials) != 2 {
-		t.Fatalf("expected 2 trials, got %d", len(trials))
+	exp := NewExperiment(design)
+	for i, run := range design.Runs() {
+		if i == 2 {
+			exp.Observe(run, 5, 0)
+		} else {
+			exp.Observe(run, 5, 6)
+		}
 	}
-
-	exp.AddResult(trials[0], []float64{2, 4})
-	exp.AddResult(trials[1], []float64{1, 1})
-
-	result := exp.Analyze()
-
-	// A=1: SNR([2,4]) = -10*log10((4+16)/2) = -10*log10(10) = -10
-	expectedSNR_A1 := -10 * math.Log10(10)
-	// A=2: SNR([1,1]) = -10*log10(1) = 0
-	expectedSNR_A2 := 0.0
-
-	snrA := result.SNR["A"]
-	if !almostEqual(snrA[0], expectedSNR_A1) {
-		t.Errorf("SNR[A][0]: got %.4f, want %.4f", snrA[0], expectedSNR_A1)
+	_, err = exp.Analyze(LargerTheBetter)
+	if !errors.Is(err, ErrDomain) || !strings.HasPrefix(err.Error(), "run 2:") {
+		t.Errorf("domain error: %v", err)
 	}
-	if !almostEqual(snrA[1], expectedSNR_A2) {
-		t.Errorf("SNR[A][1]: got %.4f, want %.4f", snrA[1], expectedSNR_A2)
+	if _, err := exp.Analyze(SNR{}); err == nil {
+		t.Error("zero SNR accepted")
 	}
 }
 
-// TestAnalyze_ANOVA_BasicSanity verifies that ANOVA fields are populated and consistent.
-func TestAnalyze_ANOVA_BasicSanity(t *testing.T) {
-	factors := []ControlFactor{
-		{Name: "A", Levels: []float64{1, 2}},
-		{Name: "B", Levels: []float64{1, 2}},
+func TestExperimentObservations(t *testing.T) {
+	design, _ := twoRuns(t)
+	exp := NewExperiment(design)
+	run := design.Run(1)
+	exp.Observe(run, 1, 2)
+	exp.Observe(run)
+	exp.Observe(run, 3)
+	got := exp.Observations(run)
+	if len(got) != 3 || got[2] != 3 {
+		t.Errorf("observations: %v", got)
 	}
-	oa := [][]int{{1, 1}, {1, 2}, {2, 1}, {2, 2}}
-	noise := []NoiseFactor{
-		{Name: "N", Levels: []float64{0}},
+	got[0] = 99
+	if exp.Observations(run)[0] != 1 {
+		t.Error("Observations returned the internal slice")
 	}
+	if exp.Design() != design {
+		t.Error("Design")
+	}
+	other, _ := twoRuns(t)
+	mustPanic(t, "run from another design", func() { exp.Observe(other.Run(0), 1) })
+	mustPanic(t, "zero run", func() { exp.Observations(Run{}) })
+	mustPanic(t, "nil design", func() { NewExperiment(nil) })
+}
 
-	exp, err := NewExperimentFromFactorsUsingArray(SmallerTheBetter{}, factors, oa, noise)
+func TestExperimentConcurrentObserve(t *testing.T) {
+	design, err := NewDesign(L8, NewFactor("A", 1, 2))
 	if err != nil {
-		t.Fatalf("NewExperimentFromFactorsUsingArray: %v", err)
+		t.Fatal(err)
 	}
-
-	trials := exp.GenerateTrials()
-	// Provide different observation patterns to produce variation
-	exp.AddResult(trials[0], []float64{2})  // A=1, B=1
-	exp.AddResult(trials[1], []float64{4})  // A=1, B=2
-	exp.AddResult(trials[2], []float64{6})  // A=2, B=1
-	exp.AddResult(trials[3], []float64{10}) // A=2, B=2
-
-	result := exp.Analyze()
-
-	// Check ANOVA fields exist for both factors
-	for _, name := range []string{"A", "B"} {
-		if _, ok := result.ANOVA.FactorSS[name]; !ok {
-			t.Errorf("ANOVA.FactorSS missing factor %s", name)
-		}
-		if _, ok := result.ANOVA.FactorDF[name]; !ok {
-			t.Errorf("ANOVA.FactorDF missing factor %s", name)
-		}
-		if _, ok := result.ANOVA.FactorMS[name]; !ok {
-			t.Errorf("ANOVA.FactorMS missing factor %s", name)
-		}
-		if _, ok := result.ANOVA.FactorF[name]; !ok {
-			t.Errorf("ANOVA.FactorF missing factor %s", name)
+	exp := NewExperiment(design)
+	var wg sync.WaitGroup
+	for g := 0; g < 50; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for _, run := range design.Runs() {
+				exp.Observe(run, float64(g+1), float64(g+2))
+			}
+		}(g)
+	}
+	wg.Wait()
+	for _, run := range design.Runs() {
+		if n := len(exp.Observations(run)); n != 100 {
+			t.Errorf("%v: %d observations, want 100", run, n)
 		}
 	}
+	if _, err := exp.Analyze(SmallerTheBetter); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	// DF for 2-level factor should be 1
-	if result.ANOVA.FactorDF["A"] != 1 {
-		t.Errorf("ANOVA.FactorDF[A]: got %d, want 1", result.ANOVA.FactorDF["A"])
+// End to end with typed factors and a noise loop: an additive model with a
+// known optimum is recovered, with names and level labels in the result.
+func TestExperimentEndToEnd(t *testing.T) {
+	workers := NewFactor("workers", 1, 4, 16)
+	algo := NewFactor("algorithm", quick, radix, quick)
+	buffer := NewFactor("buffer", 64, 256, 1024)
+	design, err := NewDesign(L9, workers, algo, buffer)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if result.ANOVA.FactorDF["B"] != 1 {
-		t.Errorf("ANOVA.FactorDF[B]: got %d, want 1", result.ANOVA.FactorDF["B"])
-	}
-
-	// Contributions should sum to 100%
-	totalContrib := 0.0
-	for _, c := range result.Contributions {
-		totalContrib += c
-	}
-	if !almostEqual(totalContrib, 100.0) {
-		t.Errorf("Contributions sum: got %.4f, want 100.0", totalContrib)
-	}
-
-	// SS values should be non-negative
-	for name, ss := range result.ANOVA.FactorSS {
-		if ss < 0 {
-			t.Errorf("ANOVA.FactorSS[%s] is negative: %.4f", name, ss)
+	latency := func(w int, a algorithm, b int, noise float64) float64 {
+		cost := 100.0 / float64(w)
+		if a == radix {
+			cost *= 0.5
 		}
+		cost += float64(b) / 128
+		return cost * noise
+	}
+	exp := NewExperiment(design)
+	for _, run := range design.Runs() {
+		for _, noise := range []float64{0.9, 1.0, 1.3} {
+			exp.Observe(run, latency(workers.Of(run), algo.Of(run), buffer.Of(run), noise))
+		}
+	}
+	an, err := exp.Analyze(SmallerTheBetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workers.Best(an) != 16 || algo.Best(an) != radix || buffer.Best(an) != 64 {
+		t.Errorf("best: %d %v %d", workers.Best(an), algo.Best(an), buffer.Best(an))
+	}
+	e, ok := an.Effect("algorithm")
+	if !ok || e.Levels[1] != "radix" || e.Best != 1 {
+		t.Errorf("algorithm effect: %+v", e)
+	}
+	if an.Error.DF != 2 || an.Saturated() {
+		t.Errorf("Error.DF = %d", an.Error.DF)
+	}
+	if an.SNR.Name != "smaller-the-better" {
+		t.Errorf("SNR recorded as %q", an.SNR.Name)
+	}
+	for _, r := range an.Runs {
+		if r.N != 3 {
+			t.Errorf("run %d: N = %d", r.Row, r.N)
+		}
+	}
+	if w, _ := an.Effect("workers"); w.Contribution < 50 {
+		t.Errorf("workers should dominate: %+v", w)
+	}
+}
+
+func TestBalanced(t *testing.T) {
+	design, _ := twoRuns(t)
+	exp := NewExperiment(design)
+	exp.Observe(design.Run(0), 1, 2, 3)
+	exp.Observe(design.Run(1), 4, 5, 6)
+	an, err := exp.Analyze(SmallerTheBetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !an.Balanced() || strings.Contains(an.String(), "equally precise") {
+		t.Error("balanced experiment reported as unbalanced")
+	}
+	exp.Observe(design.Run(1), 7, 8)
+	an, err = exp.Analyze(SmallerTheBetter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if an.Balanced() || !strings.Contains(an.String(), "between 3 and 5 observations") {
+		t.Errorf("unbalanced experiment: Balanced=%v report:\n%s", an.Balanced(), an)
+	}
+	pure, err := AnalyzeSNR(L4.Select(0), []float64{1, 2, 3, 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pure.Balanced() {
+		t.Error("AnalyzeSNR result should count as balanced")
 	}
 }
