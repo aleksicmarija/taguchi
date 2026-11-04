@@ -32,32 +32,52 @@ ones, assigns typed factors to them, collects observations, computes the
 signal-to-noise ratios, main effects and analysis of variance with F and p
 values, and prints a report.
 
+## The running example: a cake
+
+Three decisions about a cake, two options each: sugar, 100 or 150 grams;
+butter, 80 or 120 grams; baking time, 25 or 35 minutes. That is eight
+possible cakes. The Taguchi method bakes four of them, chosen by the L4
+orthogonal array so that every option of every decision is tried twice and
+every pair of decisions is tried in all four of its combinations:
+
+| cake | sugar | butter | time |
+|---|---|---|---|
+| 0 | 100 | 80 | 25 |
+| 1 | 100 | 120 | 35 |
+| 2 | 150 | 80 | 35 |
+| 3 | 150 | 120 | 25 |
+
+The noise is the tasters: three people score each cake out of ten, and
+they do not agree. A good recipe scores well with all three.
+
 ## What everything means
 
 In the order you meet them.
 
-- **Control factor.** A knob whose setting you choose. It has a name and an
-  ordered list of **levels**, the candidate settings. Levels can be values
-  of any Go type.
-- **Noise.** Conditions you do not control or choose not to fix. The method
-  does not try to remove noise; it looks for settings that are insensitive
-  to it. The library does not model noise factors: you execute each run
-  under the noise conditions of your choice and record every observation.
+- **Control factor.** A knob whose setting you choose: sugar, butter, time.
+  It has a name and an ordered list of **levels**, the candidate settings.
+  Levels can be values of any Go type.
+- **Noise.** Conditions you do not control or choose not to fix: the
+  tasters. The method does not try to remove noise; it looks for settings
+  that are insensitive to it. The library does not model noise factors: you
+  execute each run under the noise conditions of your choice and record
+  every observation.
 - **Orthogonal array.** A table with one row per **run** and one **column**
   per factor slot. Every column is balanced, each level appearing equally
   often, and every pair of columns is balanced, each combination of two
   levels appearing equally often. That balance is what lets a handful of
-  runs estimate every factor's effect without bias from the others. L8
-  means eight runs. Built in: L4, L8, L9, L12, L16, L18.
+  runs estimate every factor's effect without bias from the others. L4
+  means four runs. Built in: L4, L8, L9, L12, L16, L18.
 - **Design.** An orthogonal array with a factor assigned to each of its
   leading columns. Its one law, checked once: each factor has exactly as
   many levels as its column.
-- **Run.** One row of the design, one setting for every factor. You execute
-  each run, usually several times under different noise conditions, and
-  record every measured response as an **observation**.
+- **Run.** One row of the design, one setting for every factor: one cake.
+  You execute each run, usually several times under different noise
+  conditions, and record every measured response as an **observation**:
+  one taster's score.
 - **Quality characteristic and SNR.** What you measure and which direction
-  is good: smaller-the-better (latency, defects), larger-the-better
-  (throughput, strength), nominal-the-best (hit a target). The
+  is good: smaller-the-better (latency, defects), larger-the-better (a
+  taste score, throughput), nominal-the-best (hit a target). The
   **signal-to-noise ratio** turns all observations of one run into one
   number in decibels that rewards a good average and a small spread
   together. Higher is always better.
@@ -73,44 +93,55 @@ In the order you meet them.
   large if the factor did nothing; **contribution**, SS as a percentage of
   the total.
 - **Saturated design.** The factors use every degree of freedom, so there is
-  no error term and no F or p. The remedy is **pooling**: folding the
-  weakest factors into the error.
+  no error term and no F or p. Three two-level factors on L4 is the
+  classic case. The remedy is **pooling**: folding the weakest factors into
+  the error.
 - **Predicted SNR and confirmation run.** The SNR the additive model
-  predicts at the best settings. Executing those settings once more and
-  comparing tells you whether the model is adequate.
+  predicts at the best settings. Baking that cake once more and comparing
+  tells you whether the model is adequate.
 
 ## How to use the API
 
 ### 1. Declare factors
 
 ```go
-threads := taguchi.NewFactor("threads", 2, 4, 8)              // *Factor[int]
-batch   := taguchi.NewFactor("batch", 10, 50, 250)            // *Factor[int]
-comp    := taguchi.NewFactor("compression", None, Fast, Best) // *Factor[Compression]
+sugar  := taguchi.NewFactor("sugar", 100, 150) // grams;   *Factor[int]
+butter := taguchi.NewFactor("butter", 80, 120) // grams
+time   := taguchi.NewFactor("time", 25, 35)    // minutes
 ```
 
-Any type works as a level. Labels in reports come from `fmt.Sprint`, so a
-type with a `String` method prints its name.
+Any type works as a level: an int, a duration, an enum, a struct. Labels
+in reports come from `fmt.Sprint`, so a type with a `String` method prints
+its name.
 
 ### 2. Build a design
 
 ```go
-design, err := taguchi.NewDesign(taguchi.L9, threads, batch, comp)
+design, err := taguchi.NewDesign(taguchi.L4, sugar, butter, time)
+fmt.Println(design) // the four cakes to bake
 ```
 
 Factors take the columns of the array in order. `NewDesign` returns an
 error if a factor's level count differs from its column's, if names are
 empty or repeated, or if there are more factors than columns. Columns
-without a factor go to the error term. `fmt.Println(design)` prints the
-plan as a table.
+without a factor go to the error term.
+
+```
+Design: L4, 4 runs
+RUN  sugar  butter  time
+0    100    80      25
+1    100    120     35
+2    150    80      35
+3    150    120     25
+```
 
 In the two-level arrays some columns carry the interaction of two others:
-in L8, column 2 is the interaction of columns 0 and 1. A factor placed there
-absorbs that interaction. `Select` picks the columns to use, and any subset
-of an orthogonal array is still orthogonal:
+in L4 and L8, column 2 is the interaction of columns 0 and 1. A factor
+placed there absorbs that interaction. `Select` picks the columns to use,
+and any subset of an orthogonal array is still orthogonal:
 
 ```go
-design, err := taguchi.NewDesign(taguchi.L8.Select(0, 1, 3), a, b, c)
+design, err := taguchi.NewDesign(taguchi.L8.Select(0, 1, 3), sugar, butter, time)
 ```
 
 Any array from a reference book can be used, in the printed form with
@@ -124,18 +155,18 @@ l27, err := taguchi.NewOrthogonalArray("L27", rows) // errors.Is(err, taguchi.Er
 
 ```go
 exp := taguchi.NewExperiment(design)
-for _, run := range design.Runs() {
-	for _, payload := range payloads { // your noise conditions
-		ms := measure(threads.Of(run), batch.Of(run), comp.Of(run), payload)
-		exp.Observe(run, ms)
+for _, run := range design.Runs() {                // one cake per run
+	cake := bake(sugar.Of(run), butter.Of(run), time.Of(run))
+	for _, taster := range tasters {               // the noise: three people
+		exp.Observe(run, taster.score(cake))
 	}
 }
 ```
 
 `factor.Of(run)` returns the factor's level in that run, with the factor's
-own type. Observe a run as many times as you like; all observations are
-pooled. `Observe` is safe to call from several goroutines. `run.String()`
-prints the run's settings for logging.
+own type, so `bake` receives ints. Observe a run as many times as you like;
+all observations are pooled. `Observe` is safe to call from several
+goroutines. `run.String()` prints the run's settings for logging.
 
 A factor is a plain value and can take part in several designs, such as a
 screening design and a larger follow-up. `Of` looks it up in the design the
@@ -144,13 +175,13 @@ run came from.
 ### 4. Analyse
 
 ```go
-analysis, err := exp.Analyze(taguchi.SmallerTheBetter)
+analysis, err := exp.Analyze(taguchi.LargerTheBetter)
 if err != nil {
 	// a run without observations, or data the SNR rejects; the run is named
 }
-fmt.Print(analysis)                // the report
-best := threads.Best(analysis)     // 8, typed
-e, _ := analysis.Effect("threads") // Means, Best, SS, DF, MS, F, P, Contribution
+fmt.Print(analysis)                  // the report
+best := bake(sugar.Best(analysis), butter.Best(analysis), time.Best(analysis))
+e, _ := analysis.Effect("sugar")     // Means, Best, SS, DF, MS, F, P, Contribution
 ```
 
 | Goal | Use |
@@ -172,7 +203,7 @@ estimate:
 
 ```go
 if analysis.Saturated() {
-	analysis, err = analysis.Pool("batch")
+	analysis, err = analysis.Pool("time")
 }
 ```
 
@@ -214,11 +245,12 @@ target form penalises bias and spread together.
 Why decibels: the smaller-the-better SNR is −20 log₁₀ of the
 root-mean-square of y, so a gain of 6 dB means the RMS halved and 20 dB
 means it fell tenfold. Squaring makes a few bad observations count more
-than many good ones, which is what penalises a setting that is sometimes
-slow.
+than many good ones, which is what penalises a cake that one taster hates.
+Two cakes with the same mean score of 5: three scores of 5 give 14.0 dB,
+scores of 2, 5 and 8 give 9.9 dB. Same mean, less robust, lower SNR.
 
 Why the observations of a run are pooled before the log is taken: the log
-is not linear, so the average of per-condition SNRs is not the SNR of all
+is not linear, so the average of per-taster SNRs is not the SNR of all
 the data. The library computes each run's SNR once, over every observation
 of the run, and offers no other way to obtain one.
 
@@ -254,80 +286,95 @@ zero.
 
 ## What the result means
 
-A report for three factors on L9, three observations per run,
-smaller-the-better:
+The report for the four cakes, three tasters each, larger-the-better. The
+scores were 3, 3, 4 for cake 0; 4, 4, 4 for cake 1; 6, 6, 7 for cake 2;
+and 8, 8, 8 for cake 3.
 
 ```
-Taguchi analysis: L9, 9 runs, 3 factors, smaller-the-better
+Taguchi analysis: L4, 4 runs, 3 factors, larger-the-better
 
 RUNS (SNR in dB, pooled over N observations)
-run  threads  batch  compression  N  SNR
-0    2        10     none         3  -30.427
-1    2        50     fast         3  -30.913
-2    2        250    best         3  -34.085
-3    4        10     fast         3  -27.905
-4    4        50     best         3  -30.897
-5    4        250    none         3  -29.375
-6    8        10     best         3  -28.626
-7    8        50     none         3  -24.783
-8    8        250    fast         3  -28.199
-grand mean: -29.468 dB
+run  sugar  butter  time  N  SNR
+0    100    80      25    3  10.227
+1    100    120     35    3  12.041
+2    150    80      35    3  15.965
+3    150    120     25    3  18.062
+grand mean: 14.074 dB
 
 MAIN EFFECTS (mean SNR per level, dB; * marks the best level)
-factor       level  mean SNR
-threads      2      -31.809
-threads      4      -29.392
-threads      8      -27.203   *
-batch        10     -28.986
-batch        50     -28.864   *
-batch        250    -30.553
-compression  none   -28.195   *
-compression  fast   -29.006
-compression  best   -31.203
+factor  level  mean SNR
+sugar   100    11.134
+sugar   150    17.013    *
+butter  80     13.096
+butter  120    15.051    *
+time    25     14.144    *
+time    35     14.003
 
 ANOVA
-source       SS     DF  MS      F       p       contribution
-threads      31.85  2   15.92   22.895  0.0419  60.0%
-batch        5.321  2   2.66    3.825   0.2073  10.0%
-compression  14.53  2   7.264   10.444  0.0874  27.4%
-error        1.391  2   0.6955                  2.6%
-total        53.09  8
+source  SS       DF  MS       F    p    contribution
+sugar   34.57    1   34.57    n/a  n/a  90.0%
+butter  3.824    1   3.824    n/a  n/a  10.0%
+time    0.01994  1   0.01994  n/a  n/a  0.1%
+error   0        0   n/a                0.0%
+total   38.41    3
+note: the factors use every degree of freedom, so there is no error term and F and p
+      are not available. Pool the least significant factors with Analysis.Pool.
 
-BEST SETTINGS: threads=8 batch=50 compression=none
-predicted SNR at best settings: -25.327 dB
+BEST SETTINGS: sugar=150 butter=120 time=25
+predicted SNR at best settings: 18.062 dB
 ```
 
-**RUNS.** One SNR per run, pooled over N observations. Runs 7 and 2 are the
-best and worst combinations tried, 9.3 dB apart, so their RMS responses
-differ by a factor of about 2.9. The grand mean is the reference for
-everything below.
+**RUNS.** One SNR per cake, pooled over its three tastings. Cakes 3 and 0
+are the best and worst baked, 7.8 dB apart, so their scores differ by a
+factor of about 2.5. The grand mean is the reference for everything below.
 
 **MAIN EFFECTS.** Each factor's mean SNR at each level, best level starred.
-Read the size of an effect as the range from its worst to its best level:
-threads 4.6 dB, compression 3.0 dB, batch 1.7 dB. Threads is the knob that
-matters; batch barely does.
+Sugar at 100 grams is cakes 0 and 1, mean 11.1 dB; at 150 grams cakes 2
+and 3, mean 17.0 dB. Read the size of an effect as the gap between its
+levels: sugar 5.9 dB, butter 2.0 dB, time 0.1 dB. Sugar is the knob that
+matters; time does not.
 
 **ANOVA.** The same ranking as numbers. Contribution is how much of the
-variation between runs each factor accounts for: threads 60%, compression
-27%, batch 10%, unexplained 2.6%. F and p say whether a share is more than
-noise. Threads at p = 0.04 is a real effect. Compression at p = 0.09 and
-batch at p = 0.21 are suggestive but not established with only two error
-degrees of freedom; more observations per run or a larger array would
-sharpen them. The usual thresholds are p < 0.05 for a firm effect and
-p < 0.10 for a possible one. A small error row means the additive model
-describes the system well. A large one means noise, or interactions between
-factors, which the model does not separate. When the design is saturated
-the report says so, and F and p stay unavailable until you pool.
+variation between cakes each factor accounts for: sugar 90%, butter 10%,
+time nothing. F and p are missing because three two-level factors use all
+three degrees of freedom of a four-run design: there is nothing left to
+measure noise against. The report says so and names the remedy.
 
 **BEST SETTINGS and predicted SNR.** The best level of each factor and the
-SNR the additive model expects there. Execute that combination as a
-confirmation experiment and compare. Here it happens to be run 7, already
-measured at −24.8 dB against a prediction of −25.3 dB; a gap that small,
-within the error, means the model holds. A clear miss means factors
-interact, and the interaction is sitting in the error row.
+SNR the additive model expects there: the grand mean plus each factor's
+lift at its best level, 14.07 + 2.94 + 0.98 + 0.07. Here that combination
+is cake 3, already baked and scored 18.062 dB, exactly the prediction,
+because with no error term the additive model fits the four runs exactly.
+Normally the best settings are a cake you have not baked; bake it as the
+confirmation run and compare. A gap within a fraction of a decibel means
+the model holds. A clear miss means the factors interact.
+
+**After pooling.** Time explained nothing, so fold it into the error with
+`analysis.Pool("time")`. The ANOVA then has one error degree of freedom
+and F and p for the other two:
+
+```
+ANOVA
+source  SS       DF  MS       F         p       contribution
+sugar   34.57    1   34.57    1733.182  0.0153  90.0%
+butter  3.824    1   3.824    191.718   0.0459  10.0%
+time    0.01994  1   0.01994  n/a       n/a     n/a           pooled into error
+error   0.01994  1   0.01994                    0.1%
+total   38.41    3
+
+BEST SETTINGS: sugar=150 butter=120 time=25
+predicted SNR at best settings: 17.991 dB
+```
+
+Sugar at p = 0.015 and butter at p = 0.046 are both below the usual 0.05
+threshold, with the caveat that one error degree of freedom borrowed from
+a factor you assumed was inert is thin evidence. More tasters per cake, or
+a larger array with spare columns, would make it solid. The prediction
+drops slightly because the pooled factor no longer contributes its lift.
 
 For a factor whose p is not small, the starred level is not a finding.
-Choose that factor's level by cost or convenience.
+Choose that factor's level by cost or convenience: bake for 25 minutes
+because it is quicker.
 
 **Notes the report can add.** If runs pooled different numbers of
 observations, their SNR values are unequally precise, and the report says
